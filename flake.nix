@@ -18,6 +18,9 @@
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
+        config.permittedInsecurePackages = [
+          "freeimage-3.18.0-unstable-2024-04-18"
+        ];
         overlays = [
           nix-ros-overlay.overlays.default
         ];
@@ -41,6 +44,7 @@
         , gtsam
         , message-runtime
         , pcl-conversions
+        , tbb_2022_0
         }: 
         buildRosPackage {
           pname = "hba";
@@ -52,6 +56,7 @@
           buildInputs = [
             pcl
             eigen
+            tbb_2022_0.dev
           ];
           propagatedBuildInputs = [
             roscpp
@@ -75,6 +80,9 @@
         default = pkgs.mkShell {
           buildInputs = [
             pkgs.glibcLocales
+            pkgs.heaptrack
+            pkgs.valgrind
+            
             (pkgs.rosPackages.noetic.buildEnv {
               paths = with pkgs.rosPackages.noetic; [
                 rosbash
@@ -85,7 +93,9 @@
                 rqt-reconfigure
                 rqt-console
                 rqt-logger-level
+                rviz
                 xacro
+                self.packages.${system}.hba
               ];
             })
           ];

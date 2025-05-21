@@ -51,3 +51,19 @@ target_link_libraries(visualize_map ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 add_executable(calculate_MME source/calculate_MME.cpp)
 target_link_libraries(calculate_MME ${catkin_LIBRARIES} ${PCL_LIBRARIES} gtsam)
+
+install(DIRECTORY include/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
+
+install(TARGETS hba visualize_map calculate_MME
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY
+  "launch"
+  "rviz_cfg"
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
