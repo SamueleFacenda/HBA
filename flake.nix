@@ -78,11 +78,13 @@
     
       devShells.${system} = {
         default = pkgs.mkShell {
+          inputsFrom = [ self.packages.${system}.hba ];
           buildInputs = [
             pkgs.glibcLocales
             pkgs.heaptrack
             pkgs.valgrind
-            
+            pkgs.linuxPackages_latest.perf
+                        
             (pkgs.rosPackages.noetic.buildEnv {
               paths = with pkgs.rosPackages.noetic; [
                 rosbash

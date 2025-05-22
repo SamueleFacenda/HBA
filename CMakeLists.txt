@@ -42,6 +42,8 @@ catkin_package(
   INCLUDE_DIRS
 )
 
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE) # todo REMOVE
+
 # Hierarchical Bundle Adjustment
 add_executable(hba source/hba.cpp)
 target_link_libraries(hba ${catkin_LIBRARIES} ${PCL_LIBRARIES} gtsam)

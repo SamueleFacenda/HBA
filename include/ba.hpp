@@ -649,15 +649,15 @@ public:
     {
       if(is_calc_hess)
       {
-        double tm = ros::Time::now().toSec();
+        double tm = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
         residual1 = divide_thread(x_stats, voxhess, x_ab, Hess, JacT);
-        hesstime += ros::Time::now().toSec() - tm;
+        hesstime += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - tm;
       }
 
-      double tm = ros::Time::now().toSec();
+      double tm = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       D.diagonal() = Hess.diagonal();
       HessuD = Hess + u*D;
-      double t1 = ros::Time::now().toSec();
+      double t1 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       Eigen::SparseMatrix<double> A1_sparse(jac_leng, jac_leng);
       std::vector<Eigen::Triplet<double>> tripletlist;
       for(int a = 0; a < jac_leng; a++)
@@ -676,9 +676,9 @@ public:
       dxi = Solver_sparse.solve(-JacT);
       temp_mem = check_mem();
       if(temp_mem > max_mem) max_mem = temp_mem;
-      solvtime += ros::Time::now().toSec() - tm;
+      solvtime += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - tm;
       // new_dxi = Solver_sparse.solve(-JacT);
-      // printf("new solve time cost %f\n",ros::Time::now().toSec() - t1);
+      // printf("new solve time cost %f\n",std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t1);
       // relative_err = ((Hess + u*D)*dxi + JacT).norm()/JacT.norm();
       // absolute_err = ((Hess + u*D)*dxi + JacT).norm();
       // std::cout<<"relative error "<<relative_err<<std::endl;

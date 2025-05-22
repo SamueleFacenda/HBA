@@ -126,6 +126,26 @@ namespace mypcl
     return pc1;
   }
 
+  // merge multiple clouds, avoid multiple memory allocations
+  pcl::PointCloud<PointType>::Ptr append_clouds(vector<shared_ptr<pcl::PointCloud<PointType>>> pc_vec)
+  {
+    pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
+    int size = 0, curr_size = 0;
+    for(size_t i = 0; i < pc_vec.size(); i++)
+      size += pc_vec[i]->points.size();
+
+    pc->points.resize(size);
+    for(auto src_pc: pc_vec) {
+      for(int i=0; i<src_pc->points.size(); i++, curr_size++)
+      {
+        pc->points[curr_size].x = src_pc->points[i].x;
+        pc->points[curr_size].y = src_pc->points[i].y;
+        pc->points[curr_size].z = src_pc->points[i].z;
+      }
+    }
+    return pc;
+  }
+
   double compute_inlier_ratio(std::vector<double> residuals, double ratio)
   {
     std::set<double> dis_vec;

@@ -94,12 +94,14 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
     
     if(layer_num != 1)
       for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
-        src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
+        src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared(); // deep copy why?
 
     size_t mem_cost = 0;
+    // load point clouds
     for(int loop = 0; loop < layer.max_iter; loop++)
     {
       if(layer_num == 1)
+        // first layer loads point clouds
         for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         {
           if(loop == 0)
@@ -108,14 +110,15 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
             mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, j, "pcd/");
             raw_pc[j-i*GAP] = pc;
           }
-          src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared();
+          src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared(); // deep copy also here
         }
 
       unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
       
       for(size_t j = 0; j < WIN_SIZE; j++)
       {
-        if(layer.downsample_size > 0) downsample_voxel(*src_pc[j], layer.downsample_size);
+        if(layer.downsample_size > 0)
+          downsample_voxel(*src_pc[j], layer.downsample_size);
         cut_voxel(surf_map, *src_pc[j], Eigen::Quaterniond(x_buf[j].R), x_buf[j].p,
                   j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
       }
@@ -146,7 +149,7 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       residual_pre = residual_cur;
     }
 
-    pcl::PointCloud<PointType>::Ptr pc_keyframe(new pcl::PointCloud<PointType>);
+    // transform all the clouds
     for(size_t j = 0; j < WIN_SIZE; j++)
     {
       Eigen::Quaterniond q_tmp;
@@ -154,10 +157,11 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
                 x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
 
-      pcl::PointCloud<PointType>::Ptr pc_oneframe(new pcl::PointCloud<PointType>);
-      mypcl::transform_pointcloud(*src_pc[j], *pc_oneframe, t_tmp, q_tmp);
-      pc_keyframe = mypcl::append_cloud(pc_keyframe, *pc_oneframe);
+      mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
     }
+
+    // merge them together
+    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc);
     downsample_voxel(*pc_keyframe, 0.05);
     next_layer.pcds[i] = pc_keyframe;
   }
@@ -178,7 +182,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
   {
     printf("parallel computing %d\n", i);
     double t0, t1;
-    double t_begin = ros::Time::now().toSec();
+    double t_begin = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
@@ -193,10 +197,10 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     
     if(layer_num != 1)
     {
-      t0 = ros::Time::now().toSec();
+      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
-      load_t += ros::Time::now().toSec()-t0;
+      load_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
     }
 
     size_t mem_cost = 0;
@@ -204,7 +208,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     {
       if(layer_num == 1)
       {
-        t0 = ros::Time::now().toSec();
+        t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
         for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         {
           if(loop == 0)
@@ -215,40 +219,40 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
           }
           src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared();
         }
-        load_t += ros::Time::now().toSec()-t0;
+        load_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
       }
 
       unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
 
       for(size_t j = 0; j < WIN_SIZE; j++)
       {
-        t0 = ros::Time::now().toSec();
+        t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
         if(layer.downsample_size > 0) downsample_voxel(*src_pc[j], layer.downsample_size);
-        dsp_t += ros::Time::now().toSec()-t0;
+        dsp_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
 
-        t0 = ros::Time::now().toSec();
+        t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
         cut_voxel(surf_map, *src_pc[j], Quaterniond(x_buf[j].R), x_buf[j].p,
                   j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
-        cut_t += ros::Time::now().toSec()-t0;
+        cut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
       }
 
-      t0 = ros::Time::now().toSec();
+      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
         iter->second->recut();
-      recut_t += ros::Time::now().toSec()-t0;
+      recut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
 
-      t0 = ros::Time::now().toSec();
+      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       VOX_HESS voxhess(WIN_SIZE);
       for(auto iter = surf_map.begin(); iter != surf_map.end(); iter++)
         iter->second->tras_opt(voxhess);
-      tran_t += ros::Time::now().toSec()-t0;
+      tran_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
 
       VOX_OPTIMIZER opt_lsv(WIN_SIZE);
-      t0 = ros::Time::now().toSec();
+      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
       PLV(6) hess_vec;
       opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
-      sol_t += ros::Time::now().toSec()-t0;
+      sol_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
 
       for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
         delete iter->second;
@@ -269,7 +273,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     pcl::PointCloud<PointType>::Ptr pc_keyframe(new pcl::PointCloud<PointType>);
     for(size_t j = 0; j < WIN_SIZE; j++)
     {
-      t1 = ros::Time::now().toSec();
+      t1 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       Eigen::Quaterniond q_tmp;
       Eigen::Vector3d t_tmp;
       assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
@@ -278,17 +282,17 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       pcl::PointCloud<PointType>::Ptr pc_oneframe(new pcl::PointCloud<PointType>);
       mypcl::transform_pointcloud(*src_pc[j], *pc_oneframe, t_tmp, q_tmp);
       pc_keyframe = mypcl::append_cloud(pc_keyframe, *pc_oneframe);
-      save_t += ros::Time::now().toSec()-t1;
+      save_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t1;
     }
-    t0 = ros::Time::now().toSec();
+    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     downsample_voxel(*pc_keyframe, 0.05);
-    dsp_t += ros::Time::now().toSec()-t0;
+    dsp_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
 
-    t0 = ros::Time::now().toSec();
+    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     next_layer.pcds[i] = pc_keyframe;
-    save_t += ros::Time::now().toSec()-t0;
+    save_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
     
-    total_t += ros::Time::now().toSec()-t_begin;
+    total_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t_begin;
   }
   if(layer.tail > 0)
   {
@@ -412,31 +416,31 @@ void global_ba(LAYER& layer)
 
     for(int i = 0; i < window_size; i++)
     {
-      t0 = ros::Time::now().toSec();
+      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       if(layer.downsample_size > 0) downsample_voxel(*src_pc[i], layer.downsample_size);
-      dsp_t += ros::Time::now().toSec() - t0;
-      t0 = ros::Time::now().toSec();
+      dsp_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
+      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       cut_voxel(surf_map, *src_pc[i], Quaterniond(x_buf[i].R), x_buf[i].p, i,
                 layer.voxel_size, window_size, layer.eigen_ratio*2);
-      cut_t += ros::Time::now().toSec() - t0;
+      cut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
     }
-    t0 = ros::Time::now().toSec();
+    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
       iter->second->recut();
-    recut_t += ros::Time::now().toSec() - t0;
+    recut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
     
-    t0 = ros::Time::now().toSec();
+    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     VOX_HESS voxhess(window_size);
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
       iter->second->tras_opt(voxhess);
-    tran_t += ros::Time::now().toSec() - t0;
+    tran_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
     
-    t0 = ros::Time::now().toSec();
+    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     VOX_OPTIMIZER opt_lsv(window_size);
     opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
     PLV(6) hess_vec;
     opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
-    sol_t += ros::Time::now().toSec() - t0;
+    sol_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
 
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
       delete iter->second;
@@ -475,35 +479,38 @@ void global_ba(LAYER& layer)
 void distribute_thread(LAYER& layer, LAYER& next_layer)
 {
   int& thread_num = layer.thread_num;
-  double t0 = ros::Time::now().toSec();
-  for(int i = 0; i < thread_num; i++)
-    if(i < thread_num-1)
-      layer.mthreads[i] = new thread(parallel_comp, ref(layer), i, ref(next_layer));
-    else
-      layer.mthreads[i] = new thread(parallel_tail, ref(layer), i, ref(next_layer));
-  // printf("Thread distribution time: %f\n", ros::Time::now().toSec()-t0);
+  double t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+  for(int i = 0; i < thread_num-1; i++)
+    layer.mthreads[i] = new thread(parallel_comp, ref(layer), i, ref(next_layer));
+  layer.mthreads[thread_num-1] = new thread(parallel_tail, ref(layer), thread_num-1, ref(next_layer));
+  // printf("Thread distribution time: %f\n", std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0);
 
-  t0 = ros::Time::now().toSec();
+  t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
   for(int i = 0; i < thread_num; i++)
   {
     layer.mthreads[i]->join();
     delete layer.mthreads[i];
   }
-  // printf("Thread join time: %f\n", ros::Time::now().toSec()-t0);
+  // printf("Thread join time: %f\n", std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0);
 }
 
 int main(int argc, char** argv)
 {
-	ros::init(argc, argv, "hba");
-	ros::NodeHandle nh("~");
+//	ros::init(argc, argv, "hba");
+//	ros::NodeHandle nh("~");
 
   int total_layer_num, thread_num;
   string data_path;
 
-  nh.getParam("total_layer_num", total_layer_num);
-  nh.getParam("pcd_name_fill_num", pcd_name_fill_num);
-  nh.getParam("data_path", data_path);
-  nh.getParam("thread_num", thread_num);
+//  nh.getParam("total_layer_num", total_layer_num);
+//  nh.getParam("pcd_name_fill_num", pcd_name_fill_num);
+//  nh.getParam("data_path", data_path);
+//  nh.getParam("thread_num", thread_num);
+
+  total_layer_num = 3;
+  pcd_name_fill_num = 5;
+  data_path = "/home/samu/repos/HBA/kitti07/";
+  thread_num = 16;
 
   HBA hba(total_layer_num, data_path, thread_num);
   for(int i = 0; i < total_layer_num-1; i++)
