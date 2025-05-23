@@ -53,7 +53,9 @@ public:
     mthreads.resize(thread_num);
     mem_costs.resize(thread_num);
 
+    pcds.clear(); // delete old pcds
     pcds.resize(pose_size);
+    pose_vec.clear();
     pose_vec.resize(pose_size);
 
     #ifdef FULL_HESS
@@ -125,8 +127,10 @@ class HBA
 {
 public:
   int thread_num, total_layer_num;
-  std::vector<LAYER> layers;
+  LAYER curr_layer, next_layer;
   std::string data_path;
+  std::vector<VEC(6)> init_cov;
+  std::vector<mypcl::pose> init_pose;
 
   HBA(int total_layer_num_, std::string data_path_, int thread_num_)
   {
@@ -134,53 +138,59 @@ public:
     thread_num = thread_num_;
     data_path = data_path_;
 
-    layers.resize(total_layer_num);
-    for(int i = 0; i < total_layer_num; i++)
-    {
-      layers[i].layer_num = i+1;
-      layers[i].thread_num = thread_num;
-    }
-    layers[0].data_path = data_path;
-    layers[0].pose_vec = mypcl::read_pose(data_path + "pose.json");
-    layers[0].init_parameter();
-    layers[0].init_storage(total_layer_num);
+    curr_layer.layer_num = 1;
+    curr_layer.data_path = data_path;
+    curr_layer.thread_num = thread_num;
+    curr_layer.pose_vec = mypcl::read_pose(data_path + "pose.json");
+    curr_layer.init_parameter();
+    curr_layer.init_storage(total_layer_num);
+    init_next_layer();
 
-    for(int i = 1; i < total_layer_num; i++)
-    {
-      int pose_size_ = (layers[i-1].thread_num-1)*layers[i-1].part_length;
-      pose_size_ += layers[i-1].tail == 0 ? layers[i-1].left_gap_num : (layers[i-1].left_gap_num+1);
-      layers[i].init_parameter(pose_size_);
-      layers[i].init_storage(total_layer_num);
-      layers[i].data_path = layers[i-1].data_path + "process1/";
-    }
     printf("HBA init done!\n");
+  }
+
+  void init_next_layer() {
+    next_layer.layer_num = curr_layer.layer_num + 1;
+    next_layer.thread_num = curr_layer.thread_num;
+    int pose_size_ = (curr_layer.thread_num-1)*curr_layer.part_length;
+    pose_size_ += curr_layer.tail == 0 ? curr_layer.left_gap_num : (curr_layer.left_gap_num+1);
+    next_layer.init_parameter(pose_size_);
+    next_layer.init_storage(total_layer_num);
+    next_layer.data_path = curr_layer.data_path + "process1/";
   }
 
   void update_next_layer_state(int cur_layer_num)
   {
-    for(int i = 0; i < layers[cur_layer_num].thread_num; i++)
-      if(i < layers[cur_layer_num].thread_num-1)
-        for(int j = 0; j < layers[cur_layer_num].part_length; j++)
-        {
-          int index = (i * layers[cur_layer_num].part_length + j) * GAP;
-          layers[cur_layer_num+1].pose_vec[i*layers[cur_layer_num].part_length+j] = layers[cur_layer_num].pose_vec[index];
+    if (cur_layer_num == 0) {
+      init_pose = curr_layer.pose_vec;
+      init_cov = curr_layer.hessians;
+    }
+    
+    for(int i = 0; i < curr_layer.thread_num; i++) {
+      if (i < curr_layer.thread_num - 1)
+        for (int j = 0; j < curr_layer.part_length; j++) {
+          int index = (i * curr_layer.part_length + j) * GAP;
+          next_layer.pose_vec[i * curr_layer.part_length + j] = curr_layer.pose_vec[index];
         }
       else
-        for(int j = 0; j < layers[cur_layer_num].j_upper; j++)
-        {
-          int index = (i * layers[cur_layer_num].part_length + j) * GAP;
-          layers[cur_layer_num+1].pose_vec[i*layers[cur_layer_num].part_length+j] = layers[cur_layer_num].pose_vec[index];
+        for (int j = 0; j < curr_layer.j_upper; j++) {
+          int index = (i * curr_layer.part_length + j) * GAP;
+          next_layer.pose_vec[i * curr_layer.part_length + j] = curr_layer.pose_vec[index];
         }
+    }
+
+    curr_layer = next_layer;
+    init_next_layer();
   }
 
   void pose_graph_optimization()
   {
-    std::vector<mypcl::pose> upper_pose, init_pose;
-    upper_pose = layers[total_layer_num-1].pose_vec;
-    init_pose = layers[0].pose_vec;
-    std::vector<VEC(6)> upper_cov, init_cov;
-    upper_cov = layers[total_layer_num-1].hessians;
-    init_cov = layers[0].hessians;
+    std::vector<mypcl::pose> upper_pose;
+    upper_pose = curr_layer.pose_vec;
+    // init_pose = layers[0].pose_vec;
+    std::vector<VEC(6)> upper_cov;
+    upper_cov = curr_layer.hessians;
+    // init_cov = layers[0].hessians;
 
     int cnt = 0;
     gtsam::Values initial;

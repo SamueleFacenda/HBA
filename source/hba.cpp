@@ -101,7 +101,7 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
     for(int loop = 0; loop < layer.max_iter; loop++)
     {
       if(layer_num == 1)
-        // first layer loads point clouds
+        // first layer loads point clouds (at the first iteration)
         for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         {
           if(loop == 0)
@@ -402,7 +402,7 @@ void global_ba(LAYER& layer)
   vector<pcl::PointCloud<PointType>::Ptr> src_pc;
   src_pc.resize(window_size);
   for(int i = 0; i < window_size; i++)
-    src_pc[i] = (*layer.pcds[i]).makeShared();
+    src_pc[i] = layer.pcds[i]; // this was a deep copy but since it's not used after it doesn't make sense
 
   double residual_cur = 0, residual_pre = 0;
   size_t mem_cost = 0, max_mem = 0;
@@ -516,10 +516,10 @@ int main(int argc, char** argv)
   for(int i = 0; i < total_layer_num-1; i++)
   {
     std::cout<<"---------------------"<<std::endl;
-    distribute_thread(hba.layers[i], hba.layers[i+1]);
+    distribute_thread(hba.curr_layer, hba.next_layer);
     hba.update_next_layer_state(i);
   }
-  global_ba(hba.layers[total_layer_num-1]);
+  global_ba(hba.curr_layer);
   hba.pose_graph_optimization();
   printf("iteration complete\n");
 }
