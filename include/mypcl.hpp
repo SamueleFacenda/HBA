@@ -127,7 +127,7 @@ namespace mypcl
   }
 
   // merge multiple clouds, avoid multiple memory allocations
-  pcl::PointCloud<PointType>::Ptr append_clouds(vector<shared_ptr<pcl::PointCloud<PointType>>> pc_vec)
+  pcl::PointCloud<PointType>::Ptr append_clouds(vector<pcl::PointCloud<PointType>::Ptr> pc_vec)
   {
     pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
     int size = 0, curr_size = 0;
