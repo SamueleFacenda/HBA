@@ -20,6 +20,8 @@
 #include "tools.hpp"
 #include "ba.hpp"
 
+#define TIME_NOW std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()
+
 class LAYER
 {
 public:
@@ -53,9 +55,7 @@ public:
     mthreads.resize(thread_num);
     mem_costs.resize(thread_num);
 
-    pcds.clear(); // delete old pcds
     pcds.resize(pose_size);
-    pose_vec.clear();
     pose_vec.resize(pose_size);
 
     #ifdef FULL_HESS
@@ -150,6 +150,7 @@ public:
   }
 
   void init_next_layer() {
+    next_layer = LAYER(); // clear old data
     next_layer.layer_num = curr_layer.layer_num + 1;
     next_layer.thread_num = curr_layer.thread_num;
     int pose_size_ = (curr_layer.thread_num-1)*curr_layer.part_length;

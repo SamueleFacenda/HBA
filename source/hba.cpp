@@ -182,7 +182,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
   {
     printf("parallel computing %d\n", i);
     double t0, t1;
-    double t_begin = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    double t_begin = TIME_NOW;
     
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
@@ -197,10 +197,10 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     
     if(layer_num != 1)
     {
-      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+      t0 = TIME_NOW;
       for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
-      load_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+      load_t += TIME_NOW-t0;
     }
 
     size_t mem_cost = 0;
@@ -208,7 +208,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     {
       if(layer_num == 1)
       {
-        t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        t0 = TIME_NOW;
         for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         {
           if(loop == 0)
@@ -219,40 +219,40 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
           }
           src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared();
         }
-        load_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+        load_t += TIME_NOW-t0;
       }
 
       unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
 
       for(size_t j = 0; j < WIN_SIZE; j++)
       {
-        t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        t0 = TIME_NOW;
         if(layer.downsample_size > 0) downsample_voxel(*src_pc[j], layer.downsample_size);
-        dsp_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+        dsp_t += TIME_NOW-t0;
 
-        t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        t0 = TIME_NOW;
         cut_voxel(surf_map, *src_pc[j], Quaterniond(x_buf[j].R), x_buf[j].p,
                   j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
-        cut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+        cut_t += TIME_NOW-t0;
       }
 
-      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+      t0 = TIME_NOW;
       for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
         iter->second->recut();
-      recut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+      recut_t += TIME_NOW-t0;
 
-      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+      t0 = TIME_NOW;
       VOX_HESS voxhess(WIN_SIZE);
       for(auto iter = surf_map.begin(); iter != surf_map.end(); iter++)
         iter->second->tras_opt(voxhess);
-      tran_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+      tran_t += TIME_NOW-t0;
 
       VOX_OPTIMIZER opt_lsv(WIN_SIZE);
-      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+      t0 = TIME_NOW;
       opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
       PLV(6) hess_vec;
       opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
-      sol_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+      sol_t += TIME_NOW-t0;
 
       for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
         delete iter->second;
@@ -273,7 +273,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     pcl::PointCloud<PointType>::Ptr pc_keyframe(new pcl::PointCloud<PointType>);
     for(size_t j = 0; j < WIN_SIZE; j++)
     {
-      t1 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+      t1 = TIME_NOW;
       Eigen::Quaterniond q_tmp;
       Eigen::Vector3d t_tmp;
       assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
@@ -282,17 +282,17 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       pcl::PointCloud<PointType>::Ptr pc_oneframe(new pcl::PointCloud<PointType>);
       mypcl::transform_pointcloud(*src_pc[j], *pc_oneframe, t_tmp, q_tmp);
       pc_keyframe = mypcl::append_cloud(pc_keyframe, *pc_oneframe);
-      save_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t1;
+      save_t += TIME_NOW-t1;
     }
-    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    t0 = TIME_NOW;
     downsample_voxel(*pc_keyframe, 0.05);
-    dsp_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+    dsp_t += TIME_NOW-t0;
 
-    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    t0 = TIME_NOW;
     next_layer.pcds[i] = pc_keyframe;
-    save_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0;
+    save_t += TIME_NOW-t0;
     
-    total_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t_begin;
+    total_t += TIME_NOW-t_begin;
   }
   if(layer.tail > 0)
   {
@@ -416,31 +416,32 @@ void global_ba(LAYER& layer)
 
     for(int i = 0; i < window_size; i++)
     {
-      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
-      if(layer.downsample_size > 0) downsample_voxel(*src_pc[i], layer.downsample_size);
-      dsp_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
-      t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+      t0 = TIME_NOW;
+      if(layer.downsample_size > 0) 
+        downsample_voxel(*src_pc[i], layer.downsample_size);
+      dsp_t += TIME_NOW - t0;
+      t0 = TIME_NOW;
       cut_voxel(surf_map, *src_pc[i], Quaterniond(x_buf[i].R), x_buf[i].p, i,
                 layer.voxel_size, window_size, layer.eigen_ratio*2);
-      cut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
+      cut_t += TIME_NOW - t0;
     }
-    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    t0 = TIME_NOW;
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
       iter->second->recut();
-    recut_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
+    recut_t += TIME_NOW - t0;
     
-    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    t0 = TIME_NOW;
     VOX_HESS voxhess(window_size);
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
       iter->second->tras_opt(voxhess);
-    tran_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
+    tran_t += TIME_NOW - t0;
     
-    t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    t0 = TIME_NOW;
     VOX_OPTIMIZER opt_lsv(window_size);
     opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
     PLV(6) hess_vec;
     opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
-    sol_t += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t0;
+    sol_t += TIME_NOW - t0;
 
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
       delete iter->second;
@@ -479,13 +480,13 @@ void global_ba(LAYER& layer)
 void distribute_thread(LAYER& layer, LAYER& next_layer)
 {
   int& thread_num = layer.thread_num;
-  double t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+  double t0 = TIME_NOW;
   for(int i = 0; i < thread_num-1; i++)
     layer.mthreads[i] = new thread(parallel_comp, ref(layer), i, ref(next_layer));
   layer.mthreads[thread_num-1] = new thread(parallel_tail, ref(layer), thread_num-1, ref(next_layer));
   // printf("Thread distribution time: %f\n", std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0);
 
-  t0 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+  t0 = TIME_NOW;
   for(int i = 0; i < thread_num; i++)
   {
     layer.mthreads[i]->join();
@@ -510,7 +511,7 @@ int main(int argc, char** argv)
   total_layer_num = 3;
   pcd_name_fill_num = 5;
   data_path = "/home/samu/repos/HBA/kitti07/";
-  thread_num = 16;
+  thread_num = 20;
 
   HBA hba(total_layer_num, data_path, thread_num);
   for(int i = 0; i < total_layer_num-1; i++)
