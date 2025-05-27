@@ -47,7 +47,7 @@ public:
     return;
   }
 
-  void push_voxel(const vector<VOX_FACTOR>* sig_orig, const vector<PLV(3)>* vec_orig)
+  void push_voxel(const vector<VOX_FACTOR>* sig_orig)
   {
     int process_size = 0;
     for(int i = 0; i < win_size; i++)
@@ -286,7 +286,7 @@ class OCTO_TREE_NODE
 public:
   OCTO_STATE octo_state;
   int layer, win_size;
-  vector<PLV(3)> vec_orig, vec_tran;
+  vector<PLV(3)> vec_tran;
   vector<VOX_FACTOR> sig_orig, sig_tran;
 
   OCTO_TREE_NODE* leaves[8];
@@ -307,7 +307,7 @@ public:
     win_size(_win_size), eigen_thr(_eigen_thr)
   {
     octo_state = UNKNOWN; layer = 0;
-    vec_orig.resize(win_size); vec_tran.resize(win_size);
+    vec_tran.resize(win_size);
     sig_orig.resize(win_size); sig_tran.resize(win_size);
     for(int i = 0; i < 8; i++)
       leaves[i] = nullptr;
@@ -375,7 +375,6 @@ public:
 
   void cut_func(int ci)
   {
-    PLV(3)& pvec_orig = vec_orig[ci];
     PLV(3)& pvec_tran = vec_tran[ci];
 
     uint a_size = pvec_tran.size();
@@ -396,14 +395,11 @@ public:
         leaves[leafnum]->layer = layer + 1;
       }
 
-      leaves[leafnum]->vec_orig[ci].push_back(pvec_orig[j]);
       leaves[leafnum]->vec_tran[ci].push_back(pvec_tran[j]);
       
-      leaves[leafnum]->sig_orig[ci].push(pvec_orig[j]);
       leaves[leafnum]->sig_tran[ci].push(pvec_tran[j]);
     }
 
-    PLV(3)().swap(pvec_orig);
     PLV(3)().swap(pvec_tran);
   }
 
@@ -418,7 +414,6 @@ public:
       if(point_size < MIN_PT)
       {
         octo_state = MID_NODE;
-        vector<PLV(3)>().swap(vec_orig);
         vector<PLV(3)>().swap(vec_tran);
         vector<VOX_FACTOR>().swap(sig_orig);
         vector<VOX_FACTOR>().swap(sig_tran);
@@ -430,7 +425,6 @@ public:
         octo_state = PLANE;
         #ifndef ENABLE_FILTER
         #ifndef ENABLE_RVIZ
-        vector<PLV(3)>().swap(vec_orig);
         vector<PLV(3)>().swap(vec_tran);
         #endif
         #endif
@@ -441,7 +435,6 @@ public:
         if(layer == layer_limit)
         {
           octo_state = MID_NODE;
-          vector<PLV(3)>().swap(vec_orig);
           vector<PLV(3)>().swap(vec_tran);
           vector<VOX_FACTOR>().swap(sig_orig);
           vector<VOX_FACTOR>().swap(sig_tran);
@@ -462,7 +455,7 @@ public:
   void tras_opt(VOX_HESS& vox_opt)
   {
     if(octo_state == PLANE)
-      vox_opt.push_voxel(&sig_orig, &vec_orig);
+      vox_opt.push_voxel(&sig_orig);
     else
       for(int i = 0; i < 8; i++)
         if(leaves[i] != nullptr)

@@ -51,7 +51,6 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
     auto iter = feat_map.find(position);
     if(iter != feat_map.end())
     {
-      iter->second->vec_orig[fnum].push_back(pvec_orig);
       iter->second->vec_tran[fnum].push_back(pvec_tran);
 
       iter->second->sig_orig[fnum].push(pvec_orig);
@@ -60,7 +59,6 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
     else
     {
       OCTO_TREE_ROOT* ot = new OCTO_TREE_ROOT(window_size, eigen_ratio);
-      ot->vec_orig[fnum].push_back(pvec_orig);
       ot->vec_tran[fnum].push_back(pvec_tran);
       ot->sig_orig[fnum].push(pvec_orig);
       ot->sig_tran[fnum].push(pvec_tran);
@@ -180,8 +178,6 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
   double load_t = 0, undis_t = 0, dsp_t = 0, cut_t = 0, recut_t = 0, total_t = 0,
     tran_t = 0, sol_t = 0, save_t = 0;
   
-  if(layer.gap_num-(layer.thread_num-1)*part_length+1!=left_gap_num) printf("THIS IS WRONG!\n");
-
   for(uint i = thread_id*part_length; i < thread_id*part_length+left_gap_num; i++)
   {
     printf("parallel computing %d\n", i);
