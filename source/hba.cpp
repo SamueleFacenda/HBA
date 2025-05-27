@@ -79,8 +79,8 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
 {
   int& part_length = layer.part_length;
   int& layer_num = layer.layer_num;
-  for(int i = thread_id*part_length; i < (thread_id+1)*part_length; i++)
-  {
+  for(int i = thread_id*part_length; i < (thread_id+1)*part_length; i++) {
+
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
 
@@ -92,26 +92,27 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       x_buf[j].p = layer.pose_vec[i*GAP+j].t;
     }
     
-    if(layer_num != 1)
-      for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
-        src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared(); // deep copy why?
+    if(layer_num != 1) {
+      for (int j = i * GAP; j < i * GAP + WIN_SIZE; j++)
+        src_pc[j - i * GAP] = (*layer.pcds[j]).makeShared(); // deep copy here
+    } else {
+      for (int j = i * GAP; j < i * GAP + WIN_SIZE; j++) {
+        pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
+        mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, j, "pcd/");
+        raw_pc[j - i * GAP] = pc;
+      }
+    }
+
 
     size_t mem_cost = 0;
     // load point clouds
     for(int loop = 0; loop < layer.max_iter; loop++)
     {
-      if(layer_num == 1)
-        // first layer loads point clouds (at the first iteration)
-        for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
-        {
-          if(loop == 0)
-          {
-            pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
-            mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, j, "pcd/");
-            raw_pc[j-i*GAP] = pc;
-          }
-          src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared(); // deep copy also here
-        }
+      if(layer_num == 1) {
+        // first layer uses the raw point clouds (not downsampled) at every iteration, why?
+        for (int j = i * GAP; j < i * GAP + WIN_SIZE; j++)
+          src_pc[j - i * GAP] = (*raw_pc[j - i * GAP]).makeShared(); // deep copy here
+      }
 
       unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
       
@@ -119,28 +120,31 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       {
         if(layer.downsample_size > 0)
           downsample_voxel(*src_pc[j], layer.downsample_size);
+
         cut_voxel(surf_map, *src_pc[j], Eigen::Quaterniond(x_buf[j].R), x_buf[j].p,
                   j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
       }
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        iter->second->recut();
+
+      for(auto & iter : surf_map)
+        iter.second->recut();
       
       VOX_HESS voxhess(WIN_SIZE);
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); iter++)
-        iter->second->tras_opt(voxhess);
+      for(auto & iter : surf_map)
+        iter.second->tras_opt(voxhess);
 
       VOX_OPTIMIZER opt_lsv(WIN_SIZE);
       opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
       PLV(6) hess_vec;
       opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
 
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        delete iter->second;
+      for(auto & iter : surf_map)
+        delete iter.second;
       
-      if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
+      if(loop > 0 && abs(residual_pre - residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
       {
-        if(layer.mem_costs[thread_id] < mem_cost) layer.mem_costs[thread_id] = mem_cost;
-        
+        if(layer.mem_costs[thread_id] < mem_cost)
+          layer.mem_costs[thread_id] = mem_cost;
+
         for(int j = 0; j < WIN_SIZE*(WIN_SIZE-1)/2; j++)
           layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
         
@@ -417,7 +421,7 @@ void global_ba(LAYER& layer)
     for(int i = 0; i < window_size; i++)
     {
       t0 = TIME_NOW;
-      if(layer.downsample_size > 0) 
+      if(layer.downsample_size > 0)
         downsample_voxel(*src_pc[i], layer.downsample_size);
       dsp_t += TIME_NOW - t0;
       t0 = TIME_NOW;

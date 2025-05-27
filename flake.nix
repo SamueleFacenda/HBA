@@ -79,7 +79,7 @@
       devShells.${system} = {
         default = pkgs.mkShell {
           inputsFrom = [ self.packages.${system}.hba ];
-          buildInputs = [
+          packages = [
             pkgs.glibcLocales
             pkgs.heaptrack
             pkgs.valgrind
