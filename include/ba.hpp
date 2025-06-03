@@ -287,6 +287,7 @@ public:
   OCTO_STATE octo_state;
   int layer, win_size;
   vector<PLV(3)> vec_tran;
+  vector<vector<int>> pointIndex;
   vector<VOX_FACTOR> sig_orig, sig_tran;
 
   OCTO_TREE_NODE* leaves[8];
@@ -309,6 +310,7 @@ public:
     octo_state = UNKNOWN; layer = 0;
     vec_tran.resize(win_size);
     sig_orig.resize(win_size); sig_tran.resize(win_size);
+    pointIndex.resize(win_size);
     for(int i = 0; i < 8; i++)
       leaves[i] = nullptr;
   }
@@ -398,12 +400,14 @@ public:
       leaves[leafnum]->vec_tran[ci].push_back(pvec_tran[j]);
       
       leaves[leafnum]->sig_tran[ci].push(pvec_tran[j]);
+      leaves[leafnum]->pointIndex[ci].push_back(pointIndex[ci][j]);
     }
 
     PLV(3)().swap(pvec_tran);
+    vector<int>().swap(pointIndex[ci]);
   }
 
-  void recut()
+  void recut(vector<vector<int>>& toRemove)
   {
     if(octo_state == UNKNOWN)
     {
@@ -414,6 +418,10 @@ public:
       if(point_size < MIN_PT)
       {
         octo_state = MID_NODE;
+        for(int i = 0; i < win_size; i++)
+          toRemove.push_back(pointIndex[i]);
+
+        vector<vector<int>>().swap(pointIndex);
         vector<PLV(3)>().swap(vec_tran);
         vector<VOX_FACTOR>().swap(sig_orig);
         vector<VOX_FACTOR>().swap(sig_tran);
@@ -435,6 +443,10 @@ public:
         if(layer == layer_limit)
         {
           octo_state = MID_NODE;
+          for(int i = 0; i < win_size; i++)
+            toRemove.push_back(pointIndex[i]);
+
+          vector<vector<int>>().swap(pointIndex);
           vector<PLV(3)>().swap(vec_tran);
           vector<VOX_FACTOR>().swap(sig_orig);
           vector<VOX_FACTOR>().swap(sig_tran);
@@ -449,7 +461,7 @@ public:
     
     for(int i = 0; i < 8; i++)
       if(leaves[i] != nullptr)
-        leaves[i]->recut();
+        leaves[i]->recut(toRemove);
   }
 
   void tras_opt(VOX_HESS& vox_opt)

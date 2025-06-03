@@ -36,8 +36,9 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
                 double voxel_size, int window_size, float eigen_ratio)
 {
   float loc_xyz[3];
-  for(PointType& p_c: feat_pt.points)
+  for(int i=0; i<feat_pt.size(); i++)
   {
+    PointType p_c = feat_pt.points[i];
     Eigen::Vector3d pvec_orig(p_c.x, p_c.y, p_c.z);
     Eigen::Vector3d pvec_tran = q * pvec_orig + t;
 
@@ -51,6 +52,7 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
     auto iter = feat_map.find(position);
     if(iter != feat_map.end())
     {
+      iter->second->pointIndex[fnum].push_back(i);
       iter->second->vec_tran[fnum].push_back(pvec_tran);
 
       iter->second->sig_orig[fnum].push(pvec_orig);
@@ -59,6 +61,7 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
     else
     {
       OCTO_TREE_ROOT* ot = new OCTO_TREE_ROOT(window_size, eigen_ratio);
+      ot->pointIndex[fnum].push_back(i);
       ot->vec_tran[fnum].push_back(pvec_tran);
       ot->sig_orig[fnum].push(pvec_orig);
       ot->sig_tran[fnum].push(pvec_tran);
@@ -81,6 +84,8 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
 
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
+
+    vector<vector<int>> toRemove(WIN_SIZE);
 
     double residual_cur = 0, residual_pre = 0;
     vector<IMUST> x_buf(WIN_SIZE);
@@ -124,7 +129,7 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       }
 
       for(auto & iter : surf_map)
-        iter.second->recut();
+        iter.second->recut(toRemove);
       
       VOX_HESS voxhess(WIN_SIZE);
       for(auto & iter : surf_map)
@@ -163,7 +168,7 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
     }
 
     // merge them together
-    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc);
+    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
     downsample_voxel(*pc_keyframe, 0.05);
     next_layer.pcds[i] = pc_keyframe;
   }
@@ -186,6 +191,8 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
+
+    vector<vector<int>> toRemove(WIN_SIZE);
     
     double residual_cur = 0, residual_pre = 0;
     vector<IMUST> x_buf(WIN_SIZE);
@@ -237,14 +244,14 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       }
 
       t0 = TIME_NOW;
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        iter->second->recut();
+      for(auto & iter : surf_map)
+        iter.second->recut(toRemove);
       recut_t += TIME_NOW-t0;
 
       t0 = TIME_NOW;
       VOX_HESS voxhess(WIN_SIZE);
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); iter++)
-        iter->second->tras_opt(voxhess);
+      for(auto & iter : surf_map)
+        iter.second->tras_opt(voxhess);
       tran_t += TIME_NOW-t0;
 
       VOX_OPTIMIZER opt_lsv(WIN_SIZE);
@@ -254,8 +261,8 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
       sol_t += TIME_NOW-t0;
 
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        delete iter->second;
+      for(auto & iter : surf_map)
+        delete iter.second;
             
       if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
       {
@@ -269,8 +276,8 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       }
       residual_pre = residual_cur;
     }
-    
-    pcl::PointCloud<PointType>::Ptr pc_keyframe(new pcl::PointCloud<PointType>);
+
+    // transform all the clouds
     for(size_t j = 0; j < WIN_SIZE; j++)
     {
       t1 = TIME_NOW;
@@ -279,11 +286,15 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
                 x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
 
-      pcl::PointCloud<PointType>::Ptr pc_oneframe(new pcl::PointCloud<PointType>);
-      mypcl::transform_pointcloud(*src_pc[j], *pc_oneframe, t_tmp, q_tmp);
-      pc_keyframe = mypcl::append_cloud(pc_keyframe, *pc_oneframe);
+      mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
       save_t += TIME_NOW-t1;
     }
+
+    // merge them together
+    t1 = TIME_NOW;
+    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
+    save_t += TIME_NOW-t1;
+
     t0 = TIME_NOW;
     downsample_voxel(*pc_keyframe, 0.05);
     dsp_t += TIME_NOW-t0;
@@ -300,6 +311,8 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
 
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(layer.last_win_size); raw_pc.resize(layer.last_win_size);
+
+    vector<vector<int>> toRemove(WIN_SIZE);
 
     double residual_cur = 0, residual_pre = 0;
     vector<IMUST> x_buf(layer.last_win_size);
@@ -339,7 +352,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
                   j, layer.voxel_size, layer.last_win_size, layer.eigen_ratio);
       }
       for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        iter->second->recut();
+        iter->second->recut(toRemove);
       
       VOX_HESS voxhess(layer.last_win_size);
       for(auto iter = surf_map.begin(); iter != surf_map.end(); iter++)
@@ -365,7 +378,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       residual_pre = residual_cur;
     }
 
-    pcl::PointCloud<PointType>::Ptr pc_keyframe(new pcl::PointCloud<PointType>);
+    // transform all the clouds
     for(size_t j = 0; j < layer.last_win_size; j++)
     {
       Eigen::Quaterniond q_tmp;
@@ -373,10 +386,11 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
                 x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
 
-      pcl::PointCloud<PointType>::Ptr pc_oneframe(new pcl::PointCloud<PointType>);
-      mypcl::transform_pointcloud(*src_pc[j], *pc_oneframe, t_tmp, q_tmp);
-      pc_keyframe = mypcl::append_cloud(pc_keyframe, *pc_oneframe);
+      mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
     }
+
+    // merge them together
+    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
     downsample_voxel(*pc_keyframe, 0.05);
     next_layer.pcds[i] = pc_keyframe;
   }
@@ -398,6 +412,8 @@ void global_ba(LAYER& layer)
     x_buf[i].R = layer.pose_vec[i].q.toRotationMatrix();
     x_buf[i].p = layer.pose_vec[i].t;
   }
+
+  vector<vector<int>> toRemove(window_size);
 
   vector<pcl::PointCloud<PointType>::Ptr> src_pc;
   src_pc.resize(window_size);
@@ -427,7 +443,7 @@ void global_ba(LAYER& layer)
     }
     t0 = TIME_NOW;
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-      iter->second->recut();
+      iter->second->recut(toRemove);
     recut_t += TIME_NOW - t0;
     
     t0 = TIME_NOW;

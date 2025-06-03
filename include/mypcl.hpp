@@ -127,20 +127,27 @@ namespace mypcl
   }
 
   // merge multiple clouds, avoid multiple memory allocations
-  pcl::PointCloud<PointType>::Ptr append_clouds(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec)
+  pcl::PointCloud<PointType>::Ptr append_clouds(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec, vector<vector<int>> pointsToSkip)
   {
     pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
     int size = 0, curr_size = 0;
-    for(auto & i : pc_vec)
-      size += i->points.size();
+    for(int i = 0; i < pc_vec.size(); i++)
+      size += pc_vec[i]->points.size() - pointsToSkip[i].size();
 
     pc->points.resize(size);
-    for(const auto& src_pc: pc_vec) {
-      for(int i=0; i<src_pc->points.size(); i++, curr_size++)
-      {
-        pc->points[curr_size].x = src_pc->points[i].x;
-        pc->points[curr_size].y = src_pc->points[i].y;
-        pc->points[curr_size].z = src_pc->points[i].z;
+    for(int pc_id = 0; pc_id < pc_vec.size(); pc_id++) {
+      int toSkipIndex = 0;
+      sort(pointsToSkip[pc_id].begin(), pointsToSkip[pc_id].end());
+      for(int i=0; i<pc_vec[pc_id]->points.size(); i++) {
+        if (toSkipIndex < pointsToSkip[pc_id].size() && i == pointsToSkip[pc_id][toSkipIndex]) {
+          toSkipIndex++;
+          continue;
+        }
+
+        pc->points[curr_size].x = pc_vec[pc_id]->points[i].x;
+        pc->points[curr_size].y = pc_vec[pc_id]->points[i].y;
+        pc->points[curr_size].z = pc_vec[pc_id]->points[i].z;
+        curr_size++;
       }
     }
     return pc;
