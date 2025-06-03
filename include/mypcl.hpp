@@ -127,7 +127,7 @@ namespace mypcl
   }
 
   // merge multiple clouds, avoid multiple memory allocations
-  pcl::PointCloud<PointType>::Ptr append_clouds(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec, vector<vector<int>> pointsToSkip)
+  pcl::PointCloud<PointType>::Ptr append_clouds(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec, vector<set<int>>& pointsToSkip)
   {
     pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
     int size = 0, curr_size = 0;
@@ -136,11 +136,10 @@ namespace mypcl
 
     pc->points.resize(size);
     for(int pc_id = 0; pc_id < pc_vec.size(); pc_id++) {
-      int toSkipIndex = 0;
-      sort(pointsToSkip[pc_id].begin(), pointsToSkip[pc_id].end());
+      auto toSkipIter = pointsToSkip[pc_id].begin();
       for(int i=0; i<pc_vec[pc_id]->points.size(); i++) {
-        if (toSkipIndex < pointsToSkip[pc_id].size() && i == pointsToSkip[pc_id][toSkipIndex]) {
-          toSkipIndex++;
+        if (toSkipIter != pointsToSkip[pc_id].end() && i == *toSkipIter) {
+          toSkipIter++;
           continue;
         }
 

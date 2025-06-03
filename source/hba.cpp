@@ -36,7 +36,7 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
                 double voxel_size, int window_size, float eigen_ratio)
 {
   float loc_xyz[3];
-  for(int i=0; i<feat_pt.size(); i++)
+  for(int i=0; i<feat_pt.points.size(); i++)
   {
     PointType p_c = feat_pt.points[i];
     Eigen::Vector3d pvec_orig(p_c.x, p_c.y, p_c.z);
@@ -85,7 +85,7 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
 
-    vector<vector<int>> toRemove(WIN_SIZE);
+    vector<set<int>> toRemove(WIN_SIZE);
 
     double residual_cur = 0, residual_pre = 0;
     vector<IMUST> x_buf(WIN_SIZE);
@@ -192,7 +192,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
 
-    vector<vector<int>> toRemove(WIN_SIZE);
+    vector<set<int>> toRemove(WIN_SIZE);
     
     double residual_cur = 0, residual_pre = 0;
     vector<IMUST> x_buf(WIN_SIZE);
@@ -312,7 +312,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(layer.last_win_size); raw_pc.resize(layer.last_win_size);
 
-    vector<vector<int>> toRemove(WIN_SIZE);
+    vector<set<int>> toRemove(layer.last_win_size);
 
     double residual_cur = 0, residual_pre = 0;
     vector<IMUST> x_buf(layer.last_win_size);
@@ -413,7 +413,7 @@ void global_ba(LAYER& layer)
     x_buf[i].p = layer.pose_vec[i].t;
   }
 
-  vector<vector<int>> toRemove(window_size);
+  vector<set<int>> toRemove(window_size);
 
   vector<pcl::PointCloud<PointType>::Ptr> src_pc;
   src_pc.resize(window_size);

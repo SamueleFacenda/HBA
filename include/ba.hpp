@@ -407,7 +407,7 @@ public:
     vector<int>().swap(pointIndex[ci]);
   }
 
-  void recut(vector<vector<int>>& toRemove)
+  void recut(vector<set<int>>& toRemove)
   {
     if(octo_state == UNKNOWN)
     {
@@ -419,7 +419,7 @@ public:
       {
         octo_state = MID_NODE;
         for(int i = 0; i < win_size; i++)
-          toRemove.push_back(pointIndex[i]);
+          toRemove[i].insert(pointIndex[i].begin(), pointIndex[i].end());
 
         vector<vector<int>>().swap(pointIndex);
         vector<PLV(3)>().swap(vec_tran);
@@ -444,7 +444,7 @@ public:
         {
           octo_state = MID_NODE;
           for(int i = 0; i < win_size; i++)
-            toRemove.push_back(pointIndex[i]);
+            toRemove[i].insert(pointIndex[i].begin(), pointIndex[i].end());
 
           vector<vector<int>>().swap(pointIndex);
           vector<PLV(3)>().swap(vec_tran);
