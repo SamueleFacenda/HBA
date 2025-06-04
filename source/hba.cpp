@@ -1,25 +1,12 @@
 #include <iostream>
-#include <iomanip>
-#include <fstream>
 #include <string>
-
 #include <mutex>
-#include <assert.h>
 #include <ros/ros.h>
 #include <Eigen/StdVector>
 #include <Eigen/Dense>
-#include <sensor_msgs/Imu.h>
-#include <pcl/kdtree/kdtree_flann.h>
 #include <sensor_msgs/PointCloud2.h>
-#include <geometry_msgs/PoseArray.h>
-#include <tf/transform_broadcaster.h>
-#include <pcl/io/pcd_io.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/kdtree/kdtree_flann.h>
-#include <pcl_conversions/pcl_conversions.h>
-
 #include "ba.hpp"
 #include "hba.hpp"
 #include "tools.hpp"
@@ -76,394 +63,137 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
   }
 }
 
+void loadPCDs(LAYER& layer) {
+  for (int i = 0; i < layer.pose_size; i++) {
+    pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
+    mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, i, "pcd/");
+    if(layer.downsample_size > 0)
+      downsample_voxel(*pc, layer.downsample_size);
+    layer.pcds[i] = pc;
+  }
+}
+
+void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size = WIN_SIZE, bool print_info = false, bool is_last_layer = false) {
+  vector<pcl::PointCloud<PointType>::Ptr> src_pc(win_size);
+
+  vector<set<int>> toRemove(win_size);
+
+  double residual_cur = 0, residual_pre = 0;
+  vector<IMUST> x_buf(win_size);
+  for(int i = 0; i < win_size; i++)
+  {
+    x_buf[i].R = layer.pose_vec[part_id * GAP + i].q.toRotationMatrix();
+    x_buf[i].p = layer.pose_vec[part_id * GAP + i].t;
+  }
+
+  for (int i = part_id * GAP; i < part_id * GAP + win_size; i++)
+    src_pc[i - part_id * GAP] = (*layer.pcds[i]).makeShared(); // deep copy here
+
+  for(int loop = 0; loop < layer.max_iter; loop++) {
+    if (print_info)
+      cout << "---------------------" << endl
+           << "Iteration " << loop << endl;
+
+    unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
+
+    for(size_t i = 0; i < win_size; i++)
+      cut_voxel(surf_map, *src_pc[i], Quaterniond(x_buf[i].R), x_buf[i].p, i, layer.voxel_size, win_size, layer.eigen_ratio);
+
+    for(auto & iter : surf_map)
+      iter.second->recut(toRemove);
+
+    VOX_HESS voxhess(win_size);
+    for(auto & iter : surf_map)
+      iter.second->tras_opt(voxhess);
+
+    VOX_OPTIMIZER opt_lsv(win_size);
+    opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
+    PLV(6) hess_vec;
+    opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
+
+    for(auto & iter : surf_map)
+      delete iter.second;
+
+    if (print_info)
+      cout << "Residual absolute: " << abs(residual_pre-residual_cur) << " | "
+           << "percentage: " << abs(residual_pre-residual_cur)/abs(residual_cur) << endl;
+
+    if(loop > 0 && abs(residual_pre - residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1) {
+      for(int i = 0; i < win_size * (win_size - 1) / 2; i++)
+        layer.hessians[part_id*(WIN_SIZE-1)*WIN_SIZE/2 + i] = hess_vec[i];
+
+      break;
+    }
+    residual_pre = residual_cur;
+  }
+
+  if (is_last_layer) {
+    for(int i = 0; i < win_size; i++)
+    {
+      layer.pose_vec[i].q = Quaterniond(x_buf[i].R);
+      layer.pose_vec[i].t = x_buf[i].p;
+    }
+    return;
+  }
+
+  // transform all the clouds
+  for(size_t i = 0; i < win_size; i++)
+  {
+    Eigen::Quaterniond q_tmp;
+    Eigen::Vector3d t_tmp;
+    assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[i].R),
+              x_buf[0].R.inverse() * (x_buf[i].p - x_buf[0].p));
+
+    mypcl::transform_pointcloud(*src_pc[i], *src_pc[i], t_tmp, q_tmp);
+  }
+
+  // merge them together
+  pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
+  downsample_voxel(*pc_keyframe, next_layer.downsample_size);
+  next_layer.pcds[part_id] = pc_keyframe;
+}
+
 void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
 {
   int& part_length = layer.part_length;
-  int& layer_num = layer.layer_num;
   for(int i = thread_id*part_length; i < (thread_id+1)*part_length; i++) {
-
-    vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
-    src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
-
-    vector<set<int>> toRemove(WIN_SIZE);
-
-    double residual_cur = 0, residual_pre = 0;
-    vector<IMUST> x_buf(WIN_SIZE);
-    for(int j = 0; j < WIN_SIZE; j++)
-    {
-      x_buf[j].R = layer.pose_vec[i*GAP+j].q.toRotationMatrix();
-      x_buf[j].p = layer.pose_vec[i*GAP+j].t;
-    }
-    
-    if(layer_num != 1) {
-      for (int j = i * GAP; j < i * GAP + WIN_SIZE; j++)
-        src_pc[j - i * GAP] = (*layer.pcds[j]).makeShared(); // deep copy here
-    } else {
-      for (int j = i * GAP; j < i * GAP + WIN_SIZE; j++) {
-        pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
-        mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, j, "pcd/");
-        raw_pc[j - i * GAP] = pc;
-      }
-    }
-
-    // load point clouds
-    for(int loop = 0; loop < layer.max_iter; loop++)
-    {
-      if(layer_num == 1) {
-        // first layer uses the raw point clouds (not downsampled) at every iteration, why?
-        for (int j = i * GAP; j < i * GAP + WIN_SIZE; j++)
-          src_pc[j - i * GAP] = (*raw_pc[j - i * GAP]).makeShared(); // deep copy here
-      }
-
-      unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
-      
-      for(size_t j = 0; j < WIN_SIZE; j++)
-      {
-        if(layer.downsample_size > 0)
-          downsample_voxel(*src_pc[j], layer.downsample_size);
-
-        cut_voxel(surf_map, *src_pc[j], Eigen::Quaterniond(x_buf[j].R), x_buf[j].p,
-                  j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
-      }
-
-      for(auto & iter : surf_map)
-        iter.second->recut(toRemove);
-      
-      VOX_HESS voxhess(WIN_SIZE);
-      for(auto & iter : surf_map)
-        iter.second->tras_opt(voxhess);
-
-      VOX_OPTIMIZER opt_lsv(WIN_SIZE);
-      opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
-      PLV(6) hess_vec;
-      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
-
-      for(auto & iter : surf_map)
-        delete iter.second;
-      
-      if(loop > 0 && abs(residual_pre - residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
-      {
-
-        for(int j = 0; j < WIN_SIZE*(WIN_SIZE-1)/2; j++)
-          layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
-        
-        break;
-      }
-      residual_pre = residual_cur;
-    }
-
-    // transform all the clouds
-    for(size_t j = 0; j < WIN_SIZE; j++)
-    {
-      Eigen::Quaterniond q_tmp;
-      Eigen::Vector3d t_tmp;
-      assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
-                x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
-
-      mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
-    }
-
-    // merge them together
-    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
-    downsample_voxel(*pc_keyframe, 0.05);
-    next_layer.pcds[i] = pc_keyframe;
+    compute_window(layer, i, next_layer);
   }
 }
 
 void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
 {
   int& part_length = layer.part_length;
-  int& layer_num = layer.layer_num;
   int& left_gap_num = layer.left_gap_num;
   
-  for(uint i = thread_id*part_length; i < thread_id*part_length+left_gap_num; i++)
-  {
+  for(int i = thread_id*part_length; i < thread_id*part_length+left_gap_num; i++) {
     printf("parallel computing %d\n", i);
-
-    vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
-    src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
-
-    vector<set<int>> toRemove(WIN_SIZE);
-    
-    double residual_cur = 0, residual_pre = 0;
-    vector<IMUST> x_buf(WIN_SIZE);
-    for(int j = 0; j < WIN_SIZE; j++)
-    {
-      x_buf[j].R = layer.pose_vec[i*GAP+j].q.toRotationMatrix();
-      x_buf[j].p = layer.pose_vec[i*GAP+j].t;
-    }
-    
-    if(layer_num != 1)
-    {
-      for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
-        src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
-    }
-
-    for(int loop = 0; loop < layer.max_iter; loop++)
-    {
-      if(layer_num == 1)
-      {
-        for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
-        {
-          if(loop == 0)
-          {
-            pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
-            mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, j, "pcd/");
-            raw_pc[j-i*GAP] = pc;
-          }
-          src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared();
-        }
-      }
-
-      unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
-
-      for(size_t j = 0; j < WIN_SIZE; j++)
-      {
-        if(layer.downsample_size > 0)
-          downsample_voxel(*src_pc[j], layer.downsample_size);
-
-        cut_voxel(surf_map, *src_pc[j], Quaterniond(x_buf[j].R), x_buf[j].p,
-                  j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
-      }
-
-      for(auto & iter : surf_map)
-        iter.second->recut(toRemove);
-
-      VOX_HESS voxhess(WIN_SIZE);
-      for(auto & iter : surf_map)
-        iter.second->tras_opt(voxhess);
-
-      VOX_OPTIMIZER opt_lsv(WIN_SIZE);
-      opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
-      PLV(6) hess_vec;
-      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
-
-      for(auto & iter : surf_map)
-        delete iter.second;
-            
-      if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
-      {
-        if(i < thread_id*part_length+left_gap_num)
-          for(int j = 0; j < WIN_SIZE*(WIN_SIZE-1)/2; j++)
-            layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
-
-        break;
-      }
-      residual_pre = residual_cur;
-    }
-
-    // transform all the clouds
-    for(size_t j = 0; j < WIN_SIZE; j++)
-    {
-      Eigen::Quaterniond q_tmp;
-      Eigen::Vector3d t_tmp;
-      assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
-                x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
-
-      mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
-    }
-
-    // merge them together
-    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
-
-    downsample_voxel(*pc_keyframe, 0.05);
-
-    next_layer.pcds[i] = pc_keyframe;
-
+    compute_window(layer, i, next_layer);
   }
-  if(layer.tail > 0)
-  {
+  if(layer.tail > 0) {
     int i = thread_id*part_length+left_gap_num;
-
-    vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
-    src_pc.resize(layer.last_win_size); raw_pc.resize(layer.last_win_size);
-
-    vector<set<int>> toRemove(layer.last_win_size);
-
-    double residual_cur = 0, residual_pre = 0;
-    vector<IMUST> x_buf(layer.last_win_size);
-    for(int j = 0; j < layer.last_win_size; j++)
-    {
-      x_buf[j].R = layer.pose_vec[i*GAP+j].q.toRotationMatrix();
-      x_buf[j].p = layer.pose_vec[i*GAP+j].t;
-    }
-
-    if(layer_num != 1)
-    {
-      for(int j = i*GAP; j < i*GAP+layer.last_win_size; j++)
-        src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
-    }
-
-    for(int loop = 0; loop < layer.max_iter; loop++)
-    {
-      if(layer_num == 1)
-        for(int j = i*GAP; j < i*GAP+layer.last_win_size; j++)
-        {
-          if(loop == 0)
-          {
-            pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
-            mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, j, "pcd/");
-            raw_pc[j-i*GAP] = pc;
-          }
-          src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared();          
-        }
-
-      unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
-
-      for(size_t j = 0; j < layer.last_win_size; j++)
-      {
-        if(layer.downsample_size > 0) downsample_voxel(*src_pc[j], layer.downsample_size);
-        cut_voxel(surf_map, *src_pc[j], Quaterniond(x_buf[j].R), x_buf[j].p,
-                  j, layer.voxel_size, layer.last_win_size, layer.eigen_ratio);
-      }
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        iter->second->recut(toRemove);
-      
-      VOX_HESS voxhess(layer.last_win_size);
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); iter++)
-        iter->second->tras_opt(voxhess);
-
-      VOX_OPTIMIZER opt_lsv(layer.last_win_size);
-      opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
-      PLV(6) hess_vec;
-      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
-
-      for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-        delete iter->second;
-      
-      if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
-      {
-
-        for(int j = 0; j < layer.last_win_size*(layer.last_win_size-1)/2; j++)
-          layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
-        
-        break;
-      }
-      residual_pre = residual_cur;
-    }
-
-    // transform all the clouds
-    for(size_t j = 0; j < layer.last_win_size; j++)
-    {
-      Eigen::Quaterniond q_tmp;
-      Eigen::Vector3d t_tmp;
-      assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
-                x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
-
-      mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
-    }
-
-    // merge them together
-    pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
-    downsample_voxel(*pc_keyframe, 0.05);
-    next_layer.pcds[i] = pc_keyframe;
+    compute_window(layer, i, next_layer, layer.last_win_size);
   }
 }
 
 void global_ba(LAYER& layer)
 {
-  int window_size = layer.pose_vec.size();
-  vector<IMUST> x_buf(window_size);
-  for(int i = 0; i < window_size; i++)
-  {
-    x_buf[i].R = layer.pose_vec[i].q.toRotationMatrix();
-    x_buf[i].p = layer.pose_vec[i].t;
-  }
-
-  vector<set<int>> toRemove(window_size);
-
-  vector<pcl::PointCloud<PointType>::Ptr> src_pc;
-  src_pc.resize(window_size);
-  for(int i = 0; i < window_size; i++)
-    src_pc[i] = layer.pcds[i]; // this was a deep copy but since it's not used after it doesn't make sense
-
-  double residual_cur = 0, residual_pre = 0;
-  double dsp_t = 0, cut_t = 0, recut_t = 0, tran_t = 0, sol_t = 0, t0;
-  for(int loop = 0; loop < layer.max_iter; loop++)
-  {
-    std::cout<<"---------------------"<<std::endl;
-    std::cout<<"Iteration "<<loop<<std::endl;
-
-    unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
-
-    for(int i = 0; i < window_size; i++)
-    {
-      t0 = TIME_NOW;
-      if(layer.downsample_size > 0)
-        downsample_voxel(*src_pc[i], layer.downsample_size);
-      dsp_t += TIME_NOW - t0;
-      t0 = TIME_NOW;
-      cut_voxel(surf_map, *src_pc[i], Quaterniond(x_buf[i].R), x_buf[i].p, i,
-                layer.voxel_size, window_size, layer.eigen_ratio*2);
-      cut_t += TIME_NOW - t0;
-    }
-    t0 = TIME_NOW;
-    for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-      iter->second->recut(toRemove);
-    recut_t += TIME_NOW - t0;
-    
-    t0 = TIME_NOW;
-    VOX_HESS voxhess(window_size);
-    for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-      iter->second->tras_opt(voxhess);
-    tran_t += TIME_NOW - t0;
-    
-    t0 = TIME_NOW;
-    VOX_OPTIMIZER opt_lsv(window_size);
-    opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
-    PLV(6) hess_vec;
-    opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
-    sol_t += TIME_NOW - t0;
-
-    for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
-      delete iter->second;
-    
-    cout<<"Residual absolute: "<<abs(residual_pre-residual_cur)<<" | "
-      <<"percentage: "<<abs(residual_pre-residual_cur)/abs(residual_cur)<<endl;
-    
-    if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
-    {
-      #ifdef FULL_HESS
-      for(int i = 0; i < window_size*(window_size-1)/2; i++)
-        layer.hessians[i] = hess_vec[i];
-      #else
-      for(int i = 0; i < window_size-1; i++)
-      {
-        Matrix6d hess = Hess_cur.block(6*i, 6*i+6, 6, 6);
-        for(int row = 0; row < 6; row++)
-          for(int col = 0; col < 6; col++)
-            hessFile << hess(row, col) << ((row*col==25)?"":" ");
-        if(i < window_size-2) hessFile << "\n";
-      }
-      #endif
-      break;
-    }
-    residual_pre = residual_cur;
-  }
-  for(int i = 0; i < window_size; i++)
-  {
-    layer.pose_vec[i].q = Quaterniond(x_buf[i].R);
-    layer.pose_vec[i].t = x_buf[i].p;
-  }
-  printf("Downsample: %f, Cut: %f, Recut: %f, Tras: %f, Sol: %f\n", dsp_t, cut_t, recut_t, tran_t, sol_t);
+  int win_size = layer.pose_vec.size();
+  compute_window(layer, 0, layer, win_size, true, true);
 }
 
 void distribute_thread(LAYER& layer, LAYER& next_layer)
 {
   int& thread_num = layer.thread_num;
-  double t0 = TIME_NOW;
   for(int i = 0; i < thread_num-1; i++)
     layer.mthreads[i] = new thread(parallel_comp, ref(layer), i, ref(next_layer));
   layer.mthreads[thread_num-1] = new thread(parallel_tail, ref(layer), thread_num-1, ref(next_layer));
-  // printf("Thread distribution time: %f\n", std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0);
 
-  t0 = TIME_NOW;
   for(int i = 0; i < thread_num; i++)
   {
     layer.mthreads[i]->join();
     delete layer.mthreads[i];
   }
-  // printf("Thread join time: %f\n", std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()-t0);
 }
 
 int main(int argc, char** argv)
@@ -485,6 +215,7 @@ int main(int argc, char** argv)
   thread_num = 20;
 
   HBA hba(total_layer_num, data_path, thread_num);
+  loadPCDs(hba.curr_layer);
   for(int i = 0; i < total_layer_num-1; i++)
   {
     std::cout<<"---------------------"<<std::endl;

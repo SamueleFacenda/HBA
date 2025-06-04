@@ -20,12 +20,10 @@
 #include "tools.hpp"
 #include "ba.hpp"
 
-#define TIME_NOW std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count()
-
 class LAYER
 {
 public:
-  int pose_size, layer_num, max_iter, part_length, left_size, left_h_size, j_upper, tail, thread_num,
+  int pose_size, layer_num, max_iter, part_length, last_thread_part_length, tail, thread_num,
     gap_num, last_win_size, left_gap_num;
   double downsample_size, voxel_size, eigen_ratio, reject_ratio;
   
@@ -79,41 +77,37 @@ public:
       pose_size = pose_vec.size();
     else
       pose_size = pose_size_;
+
     tail = (pose_size - WIN_SIZE) % GAP;
     gap_num = (pose_size - WIN_SIZE) / GAP;
     last_win_size = pose_size - GAP * (gap_num+1);
     part_length = ceil((gap_num+1)/double(thread_num));
     
-    if(gap_num-(thread_num-1)*part_length < 0) part_length = floor((gap_num+1)/double(thread_num));
+    if(gap_num-(thread_num-1)*part_length < 0)
+      part_length = floor((gap_num+1)/double(thread_num));
 
+    // reduce thread num if part_length is too small
     while(part_length == 0 || (gap_num-(thread_num-1)*part_length+1)/double(part_length) > 2)
     {
       thread_num -= 1;
       part_length = ceil((gap_num+1)/double(thread_num));
-      if(gap_num-(thread_num-1)*part_length < 0) part_length = floor((gap_num+1)/double(thread_num));
+      if(gap_num-(thread_num-1)*part_length < 0)
+        part_length = floor((gap_num+1)/double(thread_num));
     }
     left_gap_num = gap_num-(thread_num-1)*part_length+1;
     
     if(tail == 0)
-    {
-      left_size = (gap_num-(thread_num-1)*part_length+1)*WIN_SIZE;
-      left_h_size = (gap_num-(thread_num-1)*part_length)*GAP+WIN_SIZE-1;
-      j_upper = gap_num-(thread_num-1)*part_length+1;
-    }
+      last_thread_part_length = gap_num - (thread_num - 1) * part_length + 1;
     else
-    {
-      left_size = (gap_num-(thread_num-1)*part_length+1)*WIN_SIZE+GAP+tail;
-      left_h_size = (gap_num-(thread_num-1)*part_length+1)*GAP+last_win_size-1;
-      j_upper = gap_num-(thread_num-1)*part_length+2;
-    }
+      last_thread_part_length = gap_num - (thread_num - 1) * part_length + 2;
 
     printf("init parameter:\n");
     printf("layer_num %d | thread_num %d | pose_size %d | max_iter %d | part_length %d | gap_num %d | last_win_size %d | "
-      "left_gap_num %d | tail %d | left_size %d | left_h_size %d | j_upper %d | "
+      "left_gap_num %d | tail  %d | last_thread_part_length %d | "
       "downsample_size %f | voxel_size %f | eigen_ratio %f | reject_ratio %f\n",
-      layer_num, thread_num, pose_size, max_iter, part_length, gap_num, last_win_size,
-      left_gap_num, tail, left_size, left_h_size, j_upper,
-      downsample_size, voxel_size, eigen_ratio, reject_ratio);
+           layer_num, thread_num, pose_size, max_iter, part_length, gap_num, last_win_size,
+           left_gap_num, tail, last_thread_part_length,
+           downsample_size, voxel_size, eigen_ratio, reject_ratio);
   }
 };
 
@@ -145,6 +139,8 @@ public:
 
   void init_next_layer() {
     next_layer = LAYER(); // clear old data
+    if (next_layer.layer_num == total_layer_num)
+      next_layer.eigen_ratio *= 2;
     next_layer.layer_num = curr_layer.layer_num + 1;
     next_layer.thread_num = curr_layer.thread_num;
     int pose_size_ = (curr_layer.thread_num-1)*curr_layer.part_length;
@@ -161,17 +157,15 @@ public:
       init_cov = curr_layer.hessians;
     }
     
-    for(int i = 0; i < curr_layer.thread_num; i++) {
-      if (i < curr_layer.thread_num - 1)
-        for (int j = 0; j < curr_layer.part_length; j++) {
-          int index = (i * curr_layer.part_length + j) * GAP;
-          next_layer.pose_vec[i * curr_layer.part_length + j] = curr_layer.pose_vec[index];
-        }
-      else
-        for (int j = 0; j < curr_layer.j_upper; j++) {
-          int index = (i * curr_layer.part_length + j) * GAP;
-          next_layer.pose_vec[i * curr_layer.part_length + j] = curr_layer.pose_vec[index];
-        }
+    for(int i = 0; i < curr_layer.thread_num - 1; i++) {
+      for (int j = 0; j < curr_layer.part_length; j++) {
+        int index = (i * curr_layer.part_length + j) * GAP;
+        next_layer.pose_vec[i * curr_layer.part_length + j] = curr_layer.pose_vec[index];
+      }
+    }
+    for (int j = 0; j < curr_layer.last_thread_part_length; j++) {
+      int index = ((curr_layer.thread_num-1) * curr_layer.part_length + j) * GAP;
+      next_layer.pose_vec[(curr_layer.thread_num-1) * curr_layer.part_length + j] = curr_layer.pose_vec[index];
     }
 
     curr_layer = next_layer;

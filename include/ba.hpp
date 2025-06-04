@@ -618,8 +618,7 @@ public:
     // std::cout << ", vox_num after " << voxhess.plvec_voxels.size() << std::endl;
   }
 
-  void damping_iter(vector<IMUST>& x_stats, VOX_HESS& voxhess, double& residual,
-                    PLV(6)& hess_vec)
+  void damping_iter(vector<IMUST>& x_stats, VOX_HESS& voxhess, double& residual, PLV(6)& hess_vec)
   {
     double u = 0.01, v = 2;
     Eigen::MatrixXd D(jac_leng, jac_leng), Hess(jac_leng, jac_leng),
@@ -661,7 +660,7 @@ public:
       dxi = Solver_sparse.solve(-JacT);
       // new_dxi = Solver_sparse.solve(-JacT);
       // relative_err = ((Hess + u*D)*dxi + JacT).norm()/JacT.norm();
-      // absolute_err = ((Hess + u*D)*dxi + DVELJacT).norm();
+      // absolute_err = ((Hess + u*D)*dxi + JacT).norm();
 
       x_stats_temp = x_stats;
       for(int j = 0; j < win_size; j++)
@@ -676,7 +675,7 @@ public:
 
       residual = residual2;
       q = residual1-residual2;
-      
+
       if(q > 0)
       {
         x_stats = x_stats_temp;
@@ -692,7 +691,7 @@ public:
         v = 2 * v;
         is_calc_hess = false;
       }
-      #ifdef AVG_THR
+
       if((fabs(residual1-residual2)/residual1) < 0.05 || i == 9)
       {
         for(int j = 0; j < win_size-1; j++)
@@ -700,9 +699,6 @@ public:
             hess_vec.push_back(Hess.block<DVEL, DVEL>(DVEL*j, DVEL*k).diagonal().segment<DVEL>(0));
         break;
       }
-      #else
-      if(fabs(residual1-residual2)<1e-9) break;
-      #endif
     }
   }
 };
