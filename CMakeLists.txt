@@ -42,7 +42,7 @@ catkin_package(
   INCLUDE_DIRS
 )
 
-set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE) # todo REMOVE
+# set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE) # todo REMOVE
 
 # Hierarchical Bundle Adjustment
 add_executable(hba source/hba.cpp)

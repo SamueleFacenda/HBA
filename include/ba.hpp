@@ -14,7 +14,6 @@
 
 #define WIN_SIZE 10
 #define GAP 5
-#define AVG_THR
 #define FULL_HESS
 // #define ENABLE_RVIZ
 // #define ENABLE_FILTER
@@ -44,7 +43,6 @@ public:
     size_t pt_size = vec_orig.size();
     for(size_t i = 0; i < pt_size; i++)
       origin_points_.emplace_back(vec_orig[i]);
-    return;
   }
 
   void push_voxel(const vector<VOX_FACTOR>* sig_orig)
@@ -598,19 +596,14 @@ public:
       residual += resis[i];
       delete mthreads[i];
     }
-    #ifdef AVG_THR
     return residual/g_size;
-    #else
-    return residual;
-    #endif
   }
 
-  double only_residual(vector<IMUST>& x_stats, VOX_HESS& voxhess, vector<IMUST>& x_ab, bool is_avg = false)
+  double only_residual(vector<IMUST>& x_stats, VOX_HESS& voxhess, vector<IMUST>& x_ab)
   {
     double residual2 = 0;
     voxhess.evaluate_only_residual(x_stats, residual2);
-    if(is_avg) return residual2 / voxhess.plvec_voxels.size();
-    return residual2;
+    return residual2 / voxhess.plvec_voxels.size();
   }
 
   void remove_outlier(vector<IMUST>& x_stats, VOX_HESS& voxhess, double ratio)
@@ -626,7 +619,7 @@ public:
   }
 
   void damping_iter(vector<IMUST>& x_stats, VOX_HESS& voxhess, double& residual,
-                    PLV(6)& hess_vec, size_t& mem_cost)
+                    PLV(6)& hess_vec)
   {
     double u = 0.01, v = 2;
     Eigen::MatrixXd D(jac_leng, jac_leng), Hess(jac_leng, jac_leng),
@@ -646,23 +639,12 @@ public:
       x_ab[i].R = x_stats[i-1].R.transpose() * x_stats[i].R;
     }
 
-    double hesstime = 0;
-    double solvtime = 0;
-    size_t max_mem = 0;
-    double loop_num = 0;
-    for(int i = 0; i < 10; i++)
-    {
+    for(int i = 0; i < 10; i++) {
       if(is_calc_hess)
-      {
-        double tm = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
         residual1 = divide_thread(x_stats, voxhess, x_ab, Hess, JacT);
-        hesstime += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - tm;
-      }
 
-      double tm = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       D.diagonal() = Hess.diagonal();
       HessuD = Hess + u*D;
-      double t1 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
       Eigen::SparseMatrix<double> A1_sparse(jac_leng, jac_leng);
       std::vector<Eigen::Triplet<double>> tripletlist;
       for(int a = 0; a < jac_leng; a++)
@@ -676,19 +658,10 @@ public:
       A1_sparse.makeCompressed();
       Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> Solver_sparse;
       Solver_sparse.compute(A1_sparse);
-      size_t temp_mem = check_mem();
-      if(temp_mem > max_mem) max_mem = temp_mem;
       dxi = Solver_sparse.solve(-JacT);
-      temp_mem = check_mem();
-      if(temp_mem > max_mem) max_mem = temp_mem;
-      solvtime += std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - tm;
       // new_dxi = Solver_sparse.solve(-JacT);
-      // printf("new solve time cost %f\n",std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() - t1);
       // relative_err = ((Hess + u*D)*dxi + JacT).norm()/JacT.norm();
-      // absolute_err = ((Hess + u*D)*dxi + JacT).norm();
-      // std::cout<<"relative error "<<relative_err<<std::endl;
-      // std::cout<<"absolute error "<<absolute_err<<std::endl;
-      // std::cout<<"delta x\n"<<(new_dxi-dxi).transpose()/dxi.norm()<<std::endl;
+      // absolute_err = ((Hess + u*D)*dxi + DVELJacT).norm();
 
       x_stats_temp = x_stats;
       for(int j = 0; j < win_size; j++)
@@ -698,20 +671,11 @@ public:
       }
 
       double q1 = 0.5*dxi.dot(u*D*dxi-JacT);
-      #ifdef AVG_THR
-      residual2 = only_residual(x_stats_temp, voxhess, x_ab, true);
-      q1 /= voxhess.plvec_voxels.size();
-      #else
       residual2 = only_residual(x_stats_temp, voxhess, x_ab);
-      #endif
+      q1 /= voxhess.plvec_voxels.size();
+
       residual = residual2;
-      q = (residual1-residual2);
-      // printf("iter%d: (%lf %lf) u: %lf v: %lf q: %lf %lf %lf\n",
-      //        i, residual1, residual2, u, v, q/q1, q1, q);
-      loop_num = i+1;
-      // if(hesstime/loop_num > 1) printf("Avg. Hessian time: %lf ", hesstime/loop_num);
-      // if(solvtime/loop_num > 1) printf("Avg. solve time: %lf\n", solvtime/loop_num);
-      // if(double(max_mem/1048576.0) > 2.0) printf("Max mem: %lf\n", double(max_mem/1048576.0));
+      q = residual1-residual2;
       
       if(q > 0)
       {
@@ -731,7 +695,6 @@ public:
       #ifdef AVG_THR
       if((fabs(residual1-residual2)/residual1) < 0.05 || i == 9)
       {
-        if(mem_cost < max_mem) mem_cost = max_mem;
         for(int j = 0; j < win_size-1; j++)
           for(int k = j+1; k < win_size; k++)
             hess_vec.push_back(Hess.block<DVEL, DVEL>(DVEL*j, DVEL*k).diagonal().segment<DVEL>(0));
@@ -741,32 +704,6 @@ public:
       if(fabs(residual1-residual2)<1e-9) break;
       #endif
     }
-  }
-
-  size_t check_mem()
-  {
-    FILE* file = fopen("/proc/self/status", "r");
-    int result = -1;
-    char line[128];
-
-    while(fgets(line, 128, file) != nullptr)
-    {
-      if(strncmp(line, "VmRSS:", 6) == 0)
-      {
-        int len = strlen(line);
-
-        const char* p = line;
-        for(; std::isdigit(*p) == false; ++p){}
-
-        line[len - 3] = 0;
-        result = atoi(p);
-
-        break;
-      }
-    }
-    fclose(file);
-
-    return result;
   }
 };
 

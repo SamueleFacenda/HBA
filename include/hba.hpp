@@ -32,7 +32,6 @@ public:
   std::string data_path;
   vector<mypcl::pose> pose_vec;
   std::vector<thread*> mthreads;
-  std::vector<double> mem_costs;
 
   std::vector<VEC(6)> hessians;
   std::vector<pcl::PointCloud<PointType>::Ptr> pcds;
@@ -47,14 +46,12 @@ public:
     eigen_ratio = 0.1;
     reject_ratio = 0.05;
     pose_vec.clear(); mthreads.clear(); pcds.clear();
-    hessians.clear(); mem_costs.clear();
+    hessians.clear();
   }
 
   void init_storage(int total_layer_num_)
   {
     mthreads.resize(thread_num);
-    mem_costs.resize(thread_num);
-
     pcds.resize(pose_size);
     pose_vec.resize(pose_size);
 
@@ -74,9 +71,6 @@ public:
       printf("hessian_size: %d\n", hessian_size);
     }
     #endif
-
-    for(int i = 0; i < thread_num; i++)
-      mem_costs.push_back(0);
   }
 
   void init_parameter(int pose_size_ = 0)

@@ -106,8 +106,6 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       }
     }
 
-
-    size_t mem_cost = 0;
     // load point clouds
     for(int loop = 0; loop < layer.max_iter; loop++)
     {
@@ -138,15 +136,13 @@ void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
       VOX_OPTIMIZER opt_lsv(WIN_SIZE);
       opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
       PLV(6) hess_vec;
-      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
+      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
 
       for(auto & iter : surf_map)
         delete iter.second;
       
       if(loop > 0 && abs(residual_pre - residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
       {
-        if(layer.mem_costs[thread_id] < mem_cost)
-          layer.mem_costs[thread_id] = mem_cost;
 
         for(int j = 0; j < WIN_SIZE*(WIN_SIZE-1)/2; j++)
           layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
@@ -179,16 +175,11 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
   int& part_length = layer.part_length;
   int& layer_num = layer.layer_num;
   int& left_gap_num = layer.left_gap_num;
-
-  double load_t = 0, undis_t = 0, dsp_t = 0, cut_t = 0, recut_t = 0, total_t = 0,
-    tran_t = 0, sol_t = 0, save_t = 0;
   
   for(uint i = thread_id*part_length; i < thread_id*part_length+left_gap_num; i++)
   {
     printf("parallel computing %d\n", i);
-    double t0, t1;
-    double t_begin = TIME_NOW;
-    
+
     vector<pcl::PointCloud<PointType>::Ptr> src_pc, raw_pc;
     src_pc.resize(WIN_SIZE); raw_pc.resize(WIN_SIZE);
 
@@ -204,18 +195,14 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     
     if(layer_num != 1)
     {
-      t0 = TIME_NOW;
       for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
-      load_t += TIME_NOW-t0;
     }
 
-    size_t mem_cost = 0;
     for(int loop = 0; loop < layer.max_iter; loop++)
     {
       if(layer_num == 1)
       {
-        t0 = TIME_NOW;
         for(int j = i*GAP; j < i*GAP+WIN_SIZE; j++)
         {
           if(loop == 0)
@@ -226,48 +213,36 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
           }
           src_pc[j-i*GAP] = (*raw_pc[j-i*GAP]).makeShared();
         }
-        load_t += TIME_NOW-t0;
       }
 
       unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*> surf_map;
 
       for(size_t j = 0; j < WIN_SIZE; j++)
       {
-        t0 = TIME_NOW;
-        if(layer.downsample_size > 0) downsample_voxel(*src_pc[j], layer.downsample_size);
-        dsp_t += TIME_NOW-t0;
+        if(layer.downsample_size > 0)
+          downsample_voxel(*src_pc[j], layer.downsample_size);
 
-        t0 = TIME_NOW;
         cut_voxel(surf_map, *src_pc[j], Quaterniond(x_buf[j].R), x_buf[j].p,
                   j, layer.voxel_size, WIN_SIZE, layer.eigen_ratio);
-        cut_t += TIME_NOW-t0;
       }
 
-      t0 = TIME_NOW;
       for(auto & iter : surf_map)
         iter.second->recut(toRemove);
-      recut_t += TIME_NOW-t0;
 
-      t0 = TIME_NOW;
       VOX_HESS voxhess(WIN_SIZE);
       for(auto & iter : surf_map)
         iter.second->tras_opt(voxhess);
-      tran_t += TIME_NOW-t0;
 
       VOX_OPTIMIZER opt_lsv(WIN_SIZE);
-      t0 = TIME_NOW;
       opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
       PLV(6) hess_vec;
-      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
-      sol_t += TIME_NOW-t0;
+      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
 
       for(auto & iter : surf_map)
         delete iter.second;
             
       if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
       {
-        if(layer.mem_costs[thread_id] < mem_cost) layer.mem_costs[thread_id] = mem_cost;
-
         if(i < thread_id*part_length+left_gap_num)
           for(int j = 0; j < WIN_SIZE*(WIN_SIZE-1)/2; j++)
             layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
@@ -280,30 +255,21 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     // transform all the clouds
     for(size_t j = 0; j < WIN_SIZE; j++)
     {
-      t1 = TIME_NOW;
       Eigen::Quaterniond q_tmp;
       Eigen::Vector3d t_tmp;
       assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[j].R),
                 x_buf[0].R.inverse() * (x_buf[j].p - x_buf[0].p));
 
       mypcl::transform_pointcloud(*src_pc[j], *src_pc[j], t_tmp, q_tmp);
-      save_t += TIME_NOW-t1;
     }
 
     // merge them together
-    t1 = TIME_NOW;
     pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
-    save_t += TIME_NOW-t1;
 
-    t0 = TIME_NOW;
     downsample_voxel(*pc_keyframe, 0.05);
-    dsp_t += TIME_NOW-t0;
 
-    t0 = TIME_NOW;
     next_layer.pcds[i] = pc_keyframe;
-    save_t += TIME_NOW-t0;
-    
-    total_t += TIME_NOW-t_begin;
+
   }
   if(layer.tail > 0)
   {
@@ -328,7 +294,6 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
         src_pc[j-i*GAP] = (*layer.pcds[j]).makeShared();
     }
 
-    size_t mem_cost = 0;
     for(int loop = 0; loop < layer.max_iter; loop++)
     {
       if(layer_num == 1)
@@ -361,14 +326,13 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
       VOX_OPTIMIZER opt_lsv(layer.last_win_size);
       opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
       PLV(6) hess_vec;
-      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
+      opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
 
       for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
         delete iter->second;
       
       if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
       {
-        if(layer.mem_costs[thread_id] < mem_cost) layer.mem_costs[thread_id] = mem_cost;
 
         for(int j = 0; j < layer.last_win_size*(layer.last_win_size-1)/2; j++)
           layer.hessians[i*(WIN_SIZE-1)*WIN_SIZE/2+j] = hess_vec[j];
@@ -394,13 +358,6 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
     downsample_voxel(*pc_keyframe, 0.05);
     next_layer.pcds[i] = pc_keyframe;
   }
-  printf("total time: %.2fs\n", total_t);
-  printf("load pcd %.2fs %.2f%% | undistort pcd %.2fs %.2f%% | "
-   "downsample %.2fs %.2f%% | cut voxel %.2fs %.2f%% | recut %.2fs %.2f%% | trans %.2fs %.2f%% | solve %.2fs %.2f%% | "
-   "save pcd %.2fs %.2f%%\n",
-    load_t, load_t/total_t*100, undis_t, undis_t/total_t*100,
-    dsp_t, dsp_t/total_t*100, cut_t, cut_t/total_t*100, recut_t, recut_t/total_t*100, tran_t, tran_t/total_t*100,
-    sol_t, sol_t/total_t*100, save_t, save_t/total_t*100);
 }
 
 void global_ba(LAYER& layer)
@@ -421,7 +378,6 @@ void global_ba(LAYER& layer)
     src_pc[i] = layer.pcds[i]; // this was a deep copy but since it's not used after it doesn't make sense
 
   double residual_cur = 0, residual_pre = 0;
-  size_t mem_cost = 0, max_mem = 0;
   double dsp_t = 0, cut_t = 0, recut_t = 0, tran_t = 0, sol_t = 0, t0;
   for(int loop = 0; loop < layer.max_iter; loop++)
   {
@@ -456,7 +412,7 @@ void global_ba(LAYER& layer)
     VOX_OPTIMIZER opt_lsv(window_size);
     opt_lsv.remove_outlier(x_buf, voxhess, layer.reject_ratio);
     PLV(6) hess_vec;
-    opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec, mem_cost);
+    opt_lsv.damping_iter(x_buf, voxhess, residual_cur, hess_vec);
     sol_t += TIME_NOW - t0;
 
     for(auto iter = surf_map.begin(); iter != surf_map.end(); ++iter)
@@ -467,7 +423,6 @@ void global_ba(LAYER& layer)
     
     if(loop > 0 && abs(residual_pre-residual_cur)/abs(residual_cur) < 0.05 || loop == layer.max_iter-1)
     {
-      if(max_mem < mem_cost) max_mem = mem_cost;
       #ifdef FULL_HESS
       for(int i = 0; i < window_size*(window_size-1)/2; i++)
         layer.hessians[i] = hess_vec[i];
