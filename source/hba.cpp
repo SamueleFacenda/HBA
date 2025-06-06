@@ -32,7 +32,8 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
     for(int j = 0; j < 3; j++)
     {
       loc_xyz[j] = pvec_tran[j] / voxel_size;
-      if(loc_xyz[j] < 0) loc_xyz[j] -= 1.0;
+      if(loc_xyz[j] < 0)
+        loc_xyz[j] -= 1.0;
     }
 
     VOXEL_LOC position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
@@ -87,7 +88,7 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
   }
 
   for (int i = part_id * GAP; i < part_id * GAP + win_size; i++)
-    src_pc[i - part_id * GAP] = (*layer.pcds[i]).makeShared(); // deep copy here
+    src_pc[i - part_id * GAP] = (*layer.pcds[i]).makeShared(); // deep copy here (not necessary when is last layer btw)
 
   for(int loop = 0; loop < layer.max_iter; loop++) {
     if (print_info)

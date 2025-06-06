@@ -18,7 +18,7 @@
 // #define ENABLE_RVIZ
 // #define ENABLE_FILTER
 
-const double one_three = (1.0 / 3.0);
+const double ONE_THREE = (1.0 / 3.0);
 
 int layer_limit = 2;
 int MIN_PT = 15;
@@ -609,95 +609,96 @@ public:
   void remove_outlier(vector<IMUST>& x_stats, VOX_HESS& voxhess, double ratio)
   {
     std::vector<double> residuals = voxhess.evaluate_residual(x_stats);
+    size_t nvx = voxhess.plvec_voxels.size();
+    if (nvx == 0 || residuals.empty())
+      return;
     std::sort(residuals.begin(), residuals.end()); // sort in ascending order
-    double threshold = residuals[std::floor((1-ratio)*voxhess.plvec_voxels.size())-1];
+
+    int raw_index = static_cast<int>(std::floor((1.0 - ratio) * nvx) - 1);
+    size_t threshold_index = std::clamp(raw_index, 0, static_cast<int>(nvx - 1));
+    double threshold = residuals[threshold_index];
+
     int reject_num = std::floor(ratio * voxhess.plvec_voxels.size());
-    // std::cout << "vox_num before " << voxhess.plvec_voxels.size();
-    // std::cout << ", reject threshold " << std::setprecision(3) << threshold << ", rejected " << reject_num;
     voxhess.remove_residual(x_stats, threshold, reject_num);
-    // std::cout << ", vox_num after " << voxhess.plvec_voxels.size() << std::endl;
   }
 
-  void damping_iter(vector<IMUST>& x_stats, VOX_HESS& voxhess, double& residual, PLV(6)& hess_vec)
-  {
+  void damping_iter(vector<IMUST>& x_stats, VOX_HESS& voxhess, double& residual, PLV(6)& hess_vec) {
     double u = 0.01, v = 2;
-    Eigen::MatrixXd D(jac_leng, jac_leng), Hess(jac_leng, jac_leng),
-                    HessuD(jac_leng, jac_leng);
-    Eigen::VectorXd JacT(jac_leng), dxi(jac_leng), new_dxi(jac_leng);
-
-    D.setIdentity();
+    Eigen::MatrixXd Hess(jac_leng, jac_leng);
+    Eigen::VectorXd JacT(jac_leng), dxi(jac_leng);
     double residual1, residual2, q;
     bool is_calc_hess = true;
     vector<IMUST> x_stats_temp;
-
     vector<IMUST> x_ab(win_size);
+
     x_ab[0] = x_stats[0];
-    for(int i=1; i<win_size; i++)
-    {
-      x_ab[i].p = x_stats[i-1].R.transpose() * (x_stats[i].p - x_stats[i-1].p);
-      x_ab[i].R = x_stats[i-1].R.transpose() * x_stats[i].R;
+    for (int i = 1; i < win_size; i++) {
+      x_ab[i].p = x_stats[i - 1].R.transpose() * (x_stats[i].p - x_stats[i - 1].p);
+      x_ab[i].R = x_stats[i - 1].R.transpose() * x_stats[i].R;
     }
 
-    for(int i = 0; i < 10; i++) {
-      if(is_calc_hess)
+    double hesstime = 0, solvtime = 0;
+    size_t max_mem = 0;
+    for (int i = 0; i < 10; i++) {
+      if (is_calc_hess)
         residual1 = divide_thread(x_stats, voxhess, x_ab, Hess, JacT);
 
-      D.diagonal() = Hess.diagonal();
-      HessuD = Hess + u*D;
-      Eigen::SparseMatrix<double> A1_sparse(jac_leng, jac_leng);
-      std::vector<Eigen::Triplet<double>> tripletlist;
-      for(int a = 0; a < jac_leng; a++)
-        for(int b = 0; b < jac_leng; b++)
-          if(HessuD(a, b) != 0)
-          {
-            tripletlist.push_back(Eigen::Triplet<double>(a, b, HessuD(a, b)));
-            //A1_sparse.insert(a, b) = HessuD(a, b);
+
+      vector<Eigen::Triplet<double>> triplets;
+      for (int r = 0; r < jac_leng; ++r) {
+
+        double d = Hess(r, r);
+        triplets.emplace_back(r, r, Hess(r, r) + u * d);
+        for (int c = r + 1; c < jac_leng; ++c) {
+          double val = Hess(r, c);
+          if (abs(val) > 1e-12) {
+            triplets.emplace_back(r, c, val);
+            triplets.emplace_back(c, r, val);
           }
-      A1_sparse.setFromTriplets(tripletlist.begin(), tripletlist.end());
-      A1_sparse.makeCompressed();
+        }
+      }
+      Eigen::SparseMatrix<double> HessuD_sparse(jac_leng, jac_leng);
+      HessuD_sparse.setFromTriplets(triplets.begin(), triplets.end());
+      HessuD_sparse.makeCompressed();
+
       Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> Solver_sparse;
-      Solver_sparse.compute(A1_sparse);
+      Solver_sparse.compute(HessuD_sparse);
+
       dxi = Solver_sparse.solve(-JacT);
-      // new_dxi = Solver_sparse.solve(-JacT);
-      // relative_err = ((Hess + u*D)*dxi + JacT).norm()/JacT.norm();
-      // absolute_err = ((Hess + u*D)*dxi + JacT).norm();
 
       x_stats_temp = x_stats;
-      for(int j = 0; j < win_size; j++)
-      {
-        x_stats_temp[j].R = x_stats[j].R * Exp(dxi.block<3, 1>(DVEL*j, 0));
-        x_stats_temp[j].p = x_stats[j].p + dxi.block<3, 1>(DVEL*j+3, 0);
+      for (int j = 0; j < win_size; j++) {
+        x_stats_temp[j].R = x_stats[j].R * Exp(dxi.block<3, 1>(DVEL * j, 0));
+        x_stats_temp[j].p = x_stats[j].p + dxi.block<3, 1>(DVEL * j + 3, 0);
       }
 
-      double q1 = 0.5*dxi.dot(u*D*dxi-JacT);
+      double q1 = 0.5 * dxi.dot(u * Hess.diagonal().asDiagonal() * dxi - JacT);
+
       residual2 = only_residual(x_stats_temp, voxhess, x_ab);
       q1 /= voxhess.plvec_voxels.size();
 
       residual = residual2;
-      q = residual1-residual2;
+      q = residual1 - residual2;
 
-      if(q > 0)
-      {
+      if (q > 0) {
         x_stats = x_stats_temp;
         q = q / q1;
         v = 2;
-        q = 1 - pow(2*q-1, 3);
-        u *= (q<one_three ? one_three:q);
+        q = 1 - pow(2 * q - 1, 3);
+        u *= (q < ONE_THREE ? ONE_THREE : q);
         is_calc_hess = true;
-      }
-      else
-      {
-        u = u * v;
-        v = 2 * v;
+      } else {
+        u *= v;
+        v *= 2;
         is_calc_hess = false;
       }
 
-      if((fabs(residual1-residual2)/residual1) < 0.05 || i == 9)
-      {
-        for(int j = 0; j < win_size-1; j++)
-          for(int k = j+1; k < win_size; k++)
-            hess_vec.push_back(Hess.block<DVEL, DVEL>(DVEL*j, DVEL*k).diagonal().segment<DVEL>(0));
-        break;
+      if ((fabs(residual1 - residual2) / residual1) < 0.05 || i == 9) {
+          for (int j = 0; j < win_size - 1; j++)
+              for (int k = j + 1; k < win_size; k++)
+                  hess_vec.push_back(Hess.block<DVEL, DVEL>(DVEL * j, DVEL * k).diagonal().segment<DVEL>(0));
+
+          break;
       }
     }
   }

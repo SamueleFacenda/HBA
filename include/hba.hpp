@@ -1,9 +1,15 @@
 #ifndef HBA_HPP
 #define HBA_HPP
 
-#include <thread>
-#include <fstream>
 #include <iomanip>
+#include <fstream>
+#include <string>
+
+#include <mutex>
+#include <assert.h>
+#include <ros/ros.h>
+#include <Eigen/StdVector>
+
 #include <Eigen/Sparse>
 #include <Eigen/Eigenvalues>
 #include <Eigen/SparseCholesky>
@@ -15,6 +21,19 @@
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/ISAM2.h>
+
+#include <Eigen/Dense>
+#include <sensor_msgs/Imu.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <geometry_msgs/PoseArray.h>
+#include <tf/transform_broadcaster.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 #include "mypcl.hpp"
 #include "tools.hpp"
