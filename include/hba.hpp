@@ -166,7 +166,7 @@ public:
     pose_size_ += curr_layer.tail == 0 ? curr_layer.left_gap_num : (curr_layer.left_gap_num+1);
     next_layer.init_parameter(pose_size_);
     next_layer.init_storage(total_layer_num);
-    next_layer.data_path = curr_layer.data_path + "process1/";
+    next_layer.data_path = curr_layer.data_path;
   }
 
   void update_next_layer_state(int cur_layer_num)

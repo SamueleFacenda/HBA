@@ -42,9 +42,10 @@ namespace mypcl
   {
     std::stringstream ss;
     if(pcd_fill_num > 0)
-      ss << std::setw(pcd_fill_num) << std::setfill('0') << num;
+      ss << "out" << std::setw(pcd_fill_num) << std::setfill('0') << num;
     else
       ss << num;
+    cout << "Saving PCD to: " << filePath + ss.str() + ".pcd" << endl;
     pcl::io::savePCDFileBinary(filePath + ss.str() + ".pcd", *pc);
   }
   

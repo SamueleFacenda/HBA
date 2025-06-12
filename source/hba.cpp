@@ -65,6 +65,7 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
 }
 
 void loadPCDs(LAYER& layer) {
+  // TODO parallel load
   for (int i = 0; i < layer.pose_size; i++) {
     pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
     mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, i, "pcd/");
@@ -134,7 +135,7 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
       layer.pose_vec[i].q = Quaterniond(x_buf[i].R);
       layer.pose_vec[i].t = x_buf[i].p;
     }
-    return;
+    // return; // get final pointcloud too
   }
 
   // transform all the clouds
@@ -177,10 +178,10 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
   }
 }
 
-void global_ba(LAYER& layer)
+void global_ba(LAYER& layer, LAYER& next_layer)
 {
   int win_size = layer.pose_vec.size();
-  compute_window(layer, 0, layer, win_size, true, true);
+  compute_window(layer, 0, next_layer, win_size, true, true);
 }
 
 void distribute_thread(LAYER& layer, LAYER& next_layer)
@@ -223,7 +224,11 @@ int main(int argc, char** argv)
     distribute_thread(hba.curr_layer, hba.next_layer);
     hba.update_next_layer_state(i);
   }
-  global_ba(hba.curr_layer);
+  global_ba(hba.curr_layer, hba.next_layer);
   hba.pose_graph_optimization();
+
+  // save hba.next_layer.pcds[0] to pcd file
+  pcl::PointCloud<PointType>::Ptr final_pc = hba.next_layer.pcds[0];
+  mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, final_pc, 0);
   printf("iteration complete\n");
 }

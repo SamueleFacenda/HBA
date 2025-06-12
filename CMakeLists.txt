@@ -34,6 +34,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
   ${GTSAM_INCLUDE_DIR}
+  ${EIGEN3_INCLUDE_DIRS}
 )
 
 catkin_package(
