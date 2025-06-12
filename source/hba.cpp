@@ -211,7 +211,7 @@ int main(int argc, char** argv)
 //  nh.getParam("data_path", data_path);
 //  nh.getParam("thread_num", thread_num);
 
-  total_layer_num = 3;
+  total_layer_num = 3; // TODO compute dinamically
   pcd_name_fill_num = 5;
   data_path = "/home/samu/repos/HBA/kitti07/";
   thread_num = 20;

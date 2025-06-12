@@ -135,9 +135,9 @@ class HBA
 public:
   int thread_num, total_layer_num;
   LAYER curr_layer, next_layer;
-  std::string data_path;
-  std::vector<VEC(6)> init_cov;
-  std::vector<mypcl::pose> init_pose;
+  string data_path;
+  vector<vector<VEC(6)>> covariances;
+  vector<vector<mypcl::pose>> poses;
 
   HBA(int total_layer_num_, std::string data_path_, int thread_num_)
   {
@@ -171,10 +171,8 @@ public:
 
   void update_next_layer_state(int cur_layer_num)
   {
-    if (cur_layer_num == 0) {
-      init_pose = curr_layer.pose_vec;
-      init_cov = curr_layer.hessians;
-    }
+    poses.push_back(curr_layer.pose_vec);
+    covariances.push_back(curr_layer.hessians);
     
     for(int i = 0; i < curr_layer.thread_num - 1; i++) {
       for (int j = 0; j < curr_layer.part_length; j++) {
@@ -193,12 +191,15 @@ public:
 
   void pose_graph_optimization()
   {
-    std::vector<mypcl::pose> upper_pose;
-    upper_pose = curr_layer.pose_vec;
-    // init_pose = layers[0].pose_vec;
-    std::vector<VEC(6)> upper_cov;
-    upper_cov = curr_layer.hessians;
-    // init_cov = layers[0].hessians;
+    poses.push_back(curr_layer.pose_vec); // TODO do it in the proper place
+    covariances.push_back(curr_layer.hessians);
+
+    std::vector<mypcl::pose> upper_pose, init_pose;
+    upper_pose = poses[total_layer_num-1];
+    init_pose = poses[0];
+    std::vector<VEC(6)> upper_cov, init_cov;
+    upper_cov = covariances[total_layer_num-1];
+    init_cov = covariances[0];
 
     int cnt = 0;
     gtsam::Values initial;
