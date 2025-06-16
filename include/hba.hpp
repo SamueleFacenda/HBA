@@ -50,6 +50,7 @@ public:
   
   std::string data_path;
   vector<mypcl::pose> pose_vec;
+  vector<vector<mypcl::pose>> computed_poses;
   std::vector<thread*> mthreads;
 
   std::vector<VEC(6)> hessians;
@@ -74,7 +75,6 @@ public:
     pcds.resize(pose_size);
     pose_vec.resize(pose_size);
 
-    #ifdef FULL_HESS
     if(layer_num < total_layer_num_)
     {
       int hessian_size = (thread_num-1)*(WIN_SIZE-1)*WIN_SIZE/2*part_length;
@@ -82,14 +82,20 @@ public:
       if(tail > 0) hessian_size += (last_win_size-1)*last_win_size/2;
       hessians.resize(hessian_size);
       printf("hessian_size: %d\n", hessian_size);
+
+      computed_poses.resize((thread_num - 1) * part_length + last_thread_part_length);
+      // for(int i = 0; i < thread_num * part_length + 1; i++)
+      //   computed_poses[i].resize(WIN_SIZE);
     }
     else
     {
       int hessian_size = pose_size*(pose_size-1)/2;
       hessians.resize(hessian_size);
       printf("hessian_size: %d\n", hessian_size);
+
+      computed_poses.resize(1);
+      // computed_poses[0].resize(pose_size); // this is done by every thread
     }
-    #endif
   }
 
   void init_parameter(int pose_size_ = 0)
@@ -118,9 +124,9 @@ public:
     left_gap_num = gap_num-(thread_num-1)*part_length+1;
     
     if(tail == 0)
-      last_thread_part_length = gap_num - (thread_num - 1) * part_length + 1;
+      last_thread_part_length = left_gap_num;
     else
-      last_thread_part_length = gap_num - (thread_num - 1) * part_length + 2;
+      last_thread_part_length = left_gap_num + 1;
 
     printf("init parameter:\n");
     printf("layer_num %d | thread_num %d | pose_size %d | max_iter %d | part_length %d | gap_num %d | last_win_size %d | "
@@ -139,7 +145,8 @@ public:
   LAYER curr_layer, next_layer;
   string data_path;
   vector<vector<VEC(6)>> covariances;
-  vector<vector<mypcl::pose>> poses;
+  vector<vector<vector<mypcl::pose>>> poses; // poses[layer_num][window_num]
+  vector<mypcl::pose> initial_poses;
 
   HBA(std::string data_path_, int thread_num_)
   {
@@ -150,6 +157,7 @@ public:
     curr_layer.data_path = data_path;
     curr_layer.thread_num = thread_num;
     curr_layer.pose_vec = mypcl::read_pose(data_path + "pose.json");
+    initial_poses = curr_layer.pose_vec;
 
     // this is the resolution of the equation that finds the number of layers necessary to have a last window size <= MAX_LAST_WIN_SIZE
     // the minimum value for the last window size is MAX_LAST_WIN_SIZE / GAP
@@ -178,7 +186,7 @@ public:
 
   void update_next_layer_state(int cur_layer_num)
   {
-    poses.push_back(curr_layer.pose_vec);
+    poses.push_back(curr_layer.computed_poses);
     covariances.push_back(curr_layer.hessians);
     
     for(int i = 0; i < curr_layer.thread_num - 1; i++) {
@@ -198,7 +206,7 @@ public:
 
   void pose_graph_optimization()
   {
-    poses.push_back(curr_layer.pose_vec); // TODO do it in the proper place
+    poses.push_back(curr_layer.computed_poses); // TODO do it in the proper place
     covariances.push_back(curr_layer.hessians);
 
     int cnt;
@@ -209,32 +217,25 @@ public:
     gtsam::noiseModel::Diagonal::shared_ptr priorModel = gtsam::noiseModel::Diagonal::Variances(vector6);
 
     // build initials
-    for (uint i = 0; i < poses[0].size(); i++)
-      initial.insert(i, gtsam::Pose3(gtsam::Rot3(poses[0][i].q.toRotationMatrix()), gtsam::Point3(poses[0][i].t)));
+    for (uint i = 0; i < initial_poses.size(); i++)
+      initial.insert(i, gtsam::Pose3(gtsam::Rot3(initial_poses[i].q.toRotationMatrix()), gtsam::Point3(initial_poses[i].t)));
 
-    graph.add(gtsam::PriorFactor<gtsam::Pose3>(0, gtsam::Pose3(gtsam::Rot3(poses[0][0].q.toRotationMatrix()),
-                                                               gtsam::Point3(poses[0][0].t)), priorModel));
+    graph.add(gtsam::PriorFactor<gtsam::Pose3>(0, gtsam::Pose3(gtsam::Rot3(initial_poses[0].q.toRotationMatrix()),
+                                                               gtsam::Point3(initial_poses[0].t)), priorModel));
 
     for (int layer = 0; layer < total_layer_num; layer++) {
-      // last layer has only one window with all poses
-      int win_size = layer == total_layer_num - 1 ? poses[layer].size() : WIN_SIZE;
-      int step = layer == total_layer_num - 1 ? poses[layer].size() : GAP;
       cnt = 0;
-      for (int window_start = 0; window_start < poses[layer].size(); window_start += step) {
-        // if there is the tail use the appropriate size
-        int current_win_size = min(win_size, (int)poses[layer].size() - window_start);
-        for (int i = 0; i < current_win_size - 1; i++) {
-          for (int j = i + 1; j < current_win_size; j++, cnt++) {
-            int first = window_start + i;
-            int second = window_start + j;
-
+      for (int window = 0; window < poses[layer].size(); window++) {
+        // build the fully connected graph for the current window
+        for (int i = 0; i < poses[layer][window].size() - 1; i++) {
+          for (int j = i + 1; j < poses[layer][window].size(); j++, cnt++) {
             if (covariances[layer][cnt].norm() < 1e-20)
               continue;
 
-            Eigen::Vector3d t_ab = poses[layer][first].t;
-            Eigen::Matrix3d R_ab = poses[layer][first].q.toRotationMatrix();
-            t_ab = R_ab.transpose() * (poses[layer][second].t - t_ab);
-            R_ab = R_ab.transpose() * poses[layer][second].q.toRotationMatrix();
+            Eigen::Vector3d t_ab = poses[layer][window][i].t;
+            Eigen::Matrix3d R_ab = poses[layer][window][i].q.toRotationMatrix();
+            t_ab = R_ab.transpose() * (poses[layer][window][j].t - t_ab);
+            R_ab = R_ab.transpose() * poses[layer][window][j].q.toRotationMatrix();
             gtsam::Rot3 R_sam(R_ab);
             gtsam::Point3 t_sam(t_ab);
 
@@ -243,12 +244,11 @@ public:
                     fabs(1.0 / covariances[layer][cnt](4)), fabs(1.0 / covariances[layer][cnt](5));
             gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(vector6);
 
-            int absoluteFirst = first * pow(GAP, layer);
-            int absoluteSecond = second * pow(GAP, layer);
+            int absoluteFirst = (window * GAP + i) * pow(GAP, layer);
+            int absoluteSecond = (window * GAP + j) * pow(GAP, layer);
 
             gtsam::NonlinearFactor::shared_ptr factor(
-                    new gtsam::BetweenFactor<gtsam::Pose3>(absoluteFirst, absoluteSecond, gtsam::Pose3(R_sam, t_sam), odometryNoise)
-                    );
+                    new gtsam::BetweenFactor<gtsam::Pose3>(absoluteFirst, absoluteSecond, gtsam::Pose3(R_sam, t_sam), odometryNoise));
             graph.push_back(factor);
           }
         }
@@ -269,9 +269,9 @@ public:
     for(uint i = 0; i < results.size(); i++)
     {
       gtsam::Pose3 pose = results.at(i).cast<gtsam::Pose3>();
-      assign_qt(poses[0][i].q, poses[0][i].t, Eigen::Quaterniond(pose.rotation().matrix()), pose.translation());
+      assign_qt(initial_poses[i].q, initial_poses[i].t, Eigen::Quaterniond(pose.rotation().matrix()), pose.translation());
     }
-    mypcl::write_pose(poses[0], data_path);
+    mypcl::write_pose(initial_poses, data_path);
     printf("pgo complete\n");
   }
 };

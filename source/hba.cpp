@@ -88,7 +88,7 @@ void loadPCDs(LAYER& layer) {
     t.join();
 }
 
-void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size = WIN_SIZE, bool print_info = false, bool is_last_layer = false) {
+void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size = WIN_SIZE, bool print_info = false) {
   vector<pcl::PointCloud<PointType>::Ptr> src_pc(win_size);
 
   vector<set<int>> toRemove(win_size);
@@ -142,13 +142,10 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
     residual_pre = residual_cur;
   }
 
-  if (is_last_layer) {
-    for(int i = 0; i < win_size; i++)
-    {
-      layer.pose_vec[i].q = Quaterniond(x_buf[i].R);
-      layer.pose_vec[i].t = x_buf[i].p;
-    }
-    // return; // get final pointcloud too
+  layer.computed_poses[part_id].resize(win_size);
+  for(int i = 0; i < win_size; i++) {
+    layer.computed_poses[part_id][i].q = Quaterniond(x_buf[i].R);
+    layer.computed_poses[part_id][i].t = x_buf[i].p;
   }
 
   // transform all the clouds
@@ -193,7 +190,7 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
 void global_ba(LAYER& layer, LAYER& next_layer)
 {
   int win_size = layer.pose_vec.size();
-  compute_window(layer, 0, next_layer, win_size, true, true);
+  compute_window(layer, 0, next_layer, win_size, true);
 }
 
 void distribute_thread(LAYER& layer, LAYER& next_layer)
