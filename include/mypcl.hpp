@@ -41,10 +41,11 @@ namespace mypcl
   void savdPCD(std::string filePath, int pcd_fill_num, pcl::PointCloud<PointType>::Ptr& pc, int num)
   {
     std::stringstream ss;
-    if(pcd_fill_num > 0)
-      ss << "out" << std::setw(pcd_fill_num) << std::setfill('0') << num;
-    else
-      ss << num;
+    ss << "out";
+    if(pcd_fill_num > 0) // apply formatting if fill number is specified
+      ss << std::setw(pcd_fill_num) << std::setfill('0');
+    ss << num;
+
     cout << "Saving PCD to: " << filePath + ss.str() + ".pcd" << endl;
     pcl::io::savePCDFileBinary(filePath + ss.str() + ".pcd", *pc);
   }
