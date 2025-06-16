@@ -65,14 +65,27 @@ void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE_ROOT*>& feat_map,
 }
 
 void loadPCDs(LAYER& layer) {
-  // TODO parallel load
-  for (int i = 0; i < layer.pose_size; i++) {
-    pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
-    mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, i, "pcd/");
-    if(layer.downsample_size > 0)
-      downsample_voxel(*pc, layer.downsample_size);
-    layer.pcds[i] = pc;
-  }
+  vector<std::thread> threads;
+  atomic<int> index(0);
+
+  auto worker = [&]() {
+      while (true) {
+        int i = index.fetch_add(1);
+        if (i >= layer.pose_size) break;
+
+        pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
+        mypcl::loadPCD(layer.data_path, pcd_name_fill_num, pc, i, "pcd/");
+        if (layer.downsample_size > 0)
+          downsample_voxel(*pc, layer.downsample_size);
+        layer.pcds[i] = pc; // TODO Make sure this is thread-safe
+      }
+  };
+
+  for (int t = 0; t < layer.thread_num; ++t)
+    threads.emplace_back(worker);
+
+  for (auto& t : threads)
+    t.join();
 }
 
 void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size = WIN_SIZE, bool print_info = false, bool is_last_layer = false) {
