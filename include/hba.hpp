@@ -194,74 +194,59 @@ public:
     poses.push_back(curr_layer.pose_vec); // TODO do it in the proper place
     covariances.push_back(curr_layer.hessians);
 
-    std::vector<mypcl::pose> upper_pose, init_pose;
-    upper_pose = poses[total_layer_num-1];
-    init_pose = poses[0];
-    std::vector<VEC(6)> upper_cov, init_cov;
-    upper_cov = covariances[total_layer_num-1];
-    init_cov = covariances[0];
-
-    int cnt = 0;
+    int cnt;
     gtsam::Values initial;
     gtsam::NonlinearFactorGraph graph;
-    gtsam::Vector Vector6(6);
-    Vector6 << 1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-8;
-    gtsam::noiseModel::Diagonal::shared_ptr priorModel = gtsam::noiseModel::Diagonal::Variances(Vector6);
-    initial.insert(0, gtsam::Pose3(gtsam::Rot3(init_pose[0].q.toRotationMatrix()), gtsam::Point3(init_pose[0].t)));
-    graph.add(gtsam::PriorFactor<gtsam::Pose3>(0, gtsam::Pose3(gtsam::Rot3(init_pose[0].q.toRotationMatrix()),
-                                                               gtsam::Point3(init_pose[0].t)), priorModel));
-    
-    for(uint i = 0; i < init_pose.size(); i++)
-    {
-      if(i > 0) initial.insert(i, gtsam::Pose3(gtsam::Rot3(init_pose[i].q.toRotationMatrix()), gtsam::Point3(init_pose[i].t)));
+    gtsam::Vector vector6(6);
+    vector6 << 1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-8;
+    gtsam::noiseModel::Diagonal::shared_ptr priorModel = gtsam::noiseModel::Diagonal::Variances(vector6);
 
-      if(i%GAP == 0 && cnt < init_cov.size())
-        for(int j = 0; j < WIN_SIZE-1; j++)
-          for(int k = j+1; k < WIN_SIZE; k++)
-          {
-            if(i+j+1 >= init_pose.size() || i+k >= init_pose.size()) break;
+    // build initials
+    for (uint i = 0; i < poses[0].size(); i++)
+      initial.insert(i, gtsam::Pose3(gtsam::Rot3(poses[0][i].q.toRotationMatrix()), gtsam::Point3(poses[0][i].t)));
 
-            cnt++;
-            if(init_cov[cnt-1].norm() < 1e-20) continue;
+    graph.add(gtsam::PriorFactor<gtsam::Pose3>(0, gtsam::Pose3(gtsam::Rot3(poses[0][0].q.toRotationMatrix()),
+                                                               gtsam::Point3(poses[0][0].t)), priorModel));
 
-            Eigen::Vector3d t_ab = init_pose[i+j].t;
-            Eigen::Matrix3d R_ab = init_pose[i+j].q.toRotationMatrix();
-            t_ab = R_ab.transpose() * (init_pose[i+k].t - t_ab);
-            R_ab = R_ab.transpose() * init_pose[i+k].q.toRotationMatrix();
+    for (int layer = 0; layer < total_layer_num; layer++) {
+      // last layer has only one window with all poses
+      int win_size = layer == total_layer_num - 1 ? poses[layer].size() : WIN_SIZE;
+      int step = layer == total_layer_num - 1 ? poses[layer].size() : GAP;
+      cnt = 0;
+      for (int window_start = 0; window_start < poses[layer].size(); window_start += step) {
+        // if there is the tail use the appropriate size
+        int current_win_size = min(win_size, (int)poses[layer].size() - window_start);
+        for (int i = 0; i < current_win_size - 1; i++) {
+          for (int j = i + 1; j < current_win_size; j++, cnt++) {
+            int first = window_start + i;
+            int second = window_start + j;
+
+            if (covariances[layer][cnt].norm() < 1e-20)
+              continue;
+
+            Eigen::Vector3d t_ab = poses[layer][first].t;
+            Eigen::Matrix3d R_ab = poses[layer][first].q.toRotationMatrix();
+            t_ab = R_ab.transpose() * (poses[layer][second].t - t_ab);
+            R_ab = R_ab.transpose() * poses[layer][second].q.toRotationMatrix();
             gtsam::Rot3 R_sam(R_ab);
             gtsam::Point3 t_sam(t_ab);
-            
-            Vector6 << fabs(1.0/init_cov[cnt-1](0)), fabs(1.0/init_cov[cnt-1](1)), fabs(1.0/init_cov[cnt-1](2)),
-                       fabs(1.0/init_cov[cnt-1](3)), fabs(1.0/init_cov[cnt-1](4)), fabs(1.0/init_cov[cnt-1](5));
-            gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(Vector6);
-            gtsam::NonlinearFactor::shared_ptr factor(new gtsam::BetweenFactor<gtsam::Pose3>(i+j, i+k, gtsam::Pose3(R_sam, t_sam),
-                                                      odometryNoise));
+
+            vector6 << fabs(1.0 / covariances[layer][cnt](0)), fabs(1.0 / covariances[layer][cnt](1)),
+                    fabs(1.0 / covariances[layer][cnt](2)), fabs(1.0 / covariances[layer][cnt](3)),
+                    fabs(1.0 / covariances[layer][cnt](4)), fabs(1.0 / covariances[layer][cnt](5));
+            gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(vector6);
+
+            int absoluteFirst = first * pow(GAP, layer);
+            int absoluteSecond = second * pow(GAP, layer);
+
+            gtsam::NonlinearFactor::shared_ptr factor(
+                    new gtsam::BetweenFactor<gtsam::Pose3>(absoluteFirst, absoluteSecond, gtsam::Pose3(R_sam, t_sam), odometryNoise)
+                    );
             graph.push_back(factor);
           }
-    }
-
-    int pose_size = upper_pose.size();
-    cnt = 0;
-    for(int i = 0; i < pose_size-1; i++)
-      for(int j = i+1; j < pose_size; j++)
-      {
-        cnt++;
-        if(upper_cov[cnt-1].norm() < 1e-20) continue;
-
-        Eigen::Vector3d t_ab = upper_pose[i].t;
-        Eigen::Matrix3d R_ab = upper_pose[i].q.toRotationMatrix();
-        t_ab = R_ab.transpose() * (upper_pose[j].t - t_ab);
-        R_ab = R_ab.transpose() * upper_pose[j].q.toRotationMatrix();
-        gtsam::Rot3 R_sam(R_ab);
-        gtsam::Point3 t_sam(t_ab);
-
-        Vector6 << fabs(1.0/upper_cov[cnt-1](0)), fabs(1.0/upper_cov[cnt-1](1)), fabs(1.0/upper_cov[cnt-1](2)),
-                   fabs(1.0/upper_cov[cnt-1](3)), fabs(1.0/upper_cov[cnt-1](4)), fabs(1.0/upper_cov[cnt-1](5));
-        gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(Vector6);
-        gtsam::NonlinearFactor::shared_ptr factor(new gtsam::BetweenFactor<gtsam::Pose3>(i*pow(GAP, total_layer_num-1),
-                                                  j*pow(GAP, total_layer_num-1), gtsam::Pose3(R_sam, t_sam), odometryNoise));
-        graph.push_back(factor);
+        }
       }
+    }
 
     gtsam::ISAM2Params parameters;
     parameters.relinearizeThreshold = 0.01;
@@ -277,9 +262,9 @@ public:
     for(uint i = 0; i < results.size(); i++)
     {
       gtsam::Pose3 pose = results.at(i).cast<gtsam::Pose3>();
-      assign_qt(init_pose[i].q, init_pose[i].t, Eigen::Quaterniond(pose.rotation().matrix()), pose.translation());
+      assign_qt(poses[0][i].q, poses[0][i].t, Eigen::Quaterniond(pose.rotation().matrix()), pose.translation());
     }
-    mypcl::write_pose(init_pose, data_path);
+    mypcl::write_pose(poses[0], data_path);
     printf("pgo complete\n");
   }
 };
