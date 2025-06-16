@@ -39,6 +39,8 @@
 #include "tools.hpp"
 #include "ba.hpp"
 
+#define MAX_LAST_WIN_SIZE (4 * WIN_SIZE)
+
 class LAYER
 {
 public:
@@ -139,9 +141,8 @@ public:
   vector<vector<VEC(6)>> covariances;
   vector<vector<mypcl::pose>> poses;
 
-  HBA(int total_layer_num_, std::string data_path_, int thread_num_)
+  HBA(std::string data_path_, int thread_num_)
   {
-    total_layer_num = total_layer_num_;
     thread_num = thread_num_;
     data_path = data_path_;
 
@@ -149,6 +150,12 @@ public:
     curr_layer.data_path = data_path;
     curr_layer.thread_num = thread_num;
     curr_layer.pose_vec = mypcl::read_pose(data_path + "pose.json");
+
+    // this is the resolution of the equation that finds the number of layers necessary to have a last window size <= MAX_LAST_WIN_SIZE
+    // the minimum value for the last window size is MAX_LAST_WIN_SIZE / GAP
+    // to use in the last layer at most the amount of resources of the first layer use MAX_LAST_WIN_SIZE = WIN_SIZE * sqrt(nthreads)
+    total_layer_num = ceil(log(curr_layer.pose_vec.size() / MAX_LAST_WIN_SIZE) / log(GAP)) + 1;
+
     curr_layer.init_parameter();
     curr_layer.init_storage(total_layer_num);
     init_next_layer();

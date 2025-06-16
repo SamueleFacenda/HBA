@@ -171,9 +171,8 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
 void parallel_comp(LAYER& layer, int thread_id, LAYER& next_layer)
 {
   int& part_length = layer.part_length;
-  for(int i = thread_id*part_length; i < (thread_id+1)*part_length; i++) {
+  for(int i = thread_id*part_length; i < (thread_id+1)*part_length; i++)
     compute_window(layer, i, next_layer);
-  }
 }
 
 void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
@@ -224,14 +223,13 @@ int main(int argc, char** argv)
 //  nh.getParam("data_path", data_path);
 //  nh.getParam("thread_num", thread_num);
 
-  total_layer_num = 3; // TODO compute dinamically
   pcd_name_fill_num = 5;
   data_path = "/home/samu/repos/HBA/kitti07/";
   thread_num = 20;
 
-  HBA hba(total_layer_num, data_path, thread_num);
+  HBA hba(data_path, thread_num);
   loadPCDs(hba.curr_layer);
-  for(int i = 0; i < total_layer_num-1; i++)
+  for(int i = 0; i < hba.total_layer_num-1; i++)
   {
     std::cout<<"---------------------"<<std::endl;
     distribute_thread(hba.curr_layer, hba.next_layer);
