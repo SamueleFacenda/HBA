@@ -156,6 +156,7 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
     assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[i].R),
               x_buf[0].R.inverse() * (x_buf[i].p - x_buf[0].p));
 
+    // TODO make this directly in merging, to avoid copying clouds every time (there are 2/3 copies for every cloud)
     mypcl::transform_pointcloud(*src_pc[i], *src_pc[i], t_tmp, q_tmp);
   }
 

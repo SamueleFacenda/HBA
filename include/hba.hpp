@@ -162,6 +162,7 @@ public:
     // this is the resolution of the equation that finds the number of layers necessary to have a last window size <= MAX_LAST_WIN_SIZE
     // the minimum value for the last window size is MAX_LAST_WIN_SIZE / GAP
     // to use in the last layer at most the amount of resources of the first layer use MAX_LAST_WIN_SIZE = WIN_SIZE * sqrt(nthreads)
+    // the plus one is because the last layer uses all the poses as a single window and doesn't divide them
     total_layer_num = ceil(log(curr_layer.pose_vec.size() / MAX_LAST_WIN_SIZE) / log(GAP)) + 1;
 
     curr_layer.init_parameter();
@@ -217,11 +218,18 @@ public:
     gtsam::noiseModel::Diagonal::shared_ptr priorModel = gtsam::noiseModel::Diagonal::Variances(vector6);
 
     // build initials
-    for (uint i = 0; i < initial_poses.size(); i++)
+    for (int i = 0; i < initial_poses.size(); i++)
       initial.insert(i, gtsam::Pose3(gtsam::Rot3(initial_poses[i].q.toRotationMatrix()), gtsam::Point3(initial_poses[i].t)));
 
     graph.add(gtsam::PriorFactor<gtsam::Pose3>(0, gtsam::Pose3(gtsam::Rot3(initial_poses[0].q.toRotationMatrix()),
                                                                gtsam::Point3(initial_poses[0].t)), priorModel));
+
+    // to avoid disconnected graph, add factors between initial poses
+    for (int i = 0; i < initial_poses.size() - 1; i++) {
+      vector6 << 0.005, 0.005, 0.005, 0.005, 0.005, 0.005; // TODO set proper values
+      gtsam::NonlinearFactor::shared_ptr factor = getBetweenFactor(i, i+1, initial_poses[i], initial_poses[i+1], vector6);
+      graph.push_back(factor);
+    }
 
     for (int layer = 0; layer < total_layer_num; layer++) {
       cnt = 0;
@@ -232,23 +240,17 @@ public:
             if (covariances[layer][cnt].norm() < 1e-20)
               continue;
 
-            Eigen::Vector3d t_ab = poses[layer][window][i].t;
-            Eigen::Matrix3d R_ab = poses[layer][window][i].q.toRotationMatrix();
-            t_ab = R_ab.transpose() * (poses[layer][window][j].t - t_ab);
-            R_ab = R_ab.transpose() * poses[layer][window][j].q.toRotationMatrix();
-            gtsam::Rot3 R_sam(R_ab);
-            gtsam::Point3 t_sam(t_ab);
+            int absoluteFirst = (window * GAP + i) * pow(GAP, layer);
+            int absoluteSecond = (window * GAP + j) * pow(GAP, layer);
 
             vector6 << fabs(1.0 / covariances[layer][cnt](0)), fabs(1.0 / covariances[layer][cnt](1)),
                     fabs(1.0 / covariances[layer][cnt](2)), fabs(1.0 / covariances[layer][cnt](3)),
                     fabs(1.0 / covariances[layer][cnt](4)), fabs(1.0 / covariances[layer][cnt](5));
-            gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(vector6);
 
-            int absoluteFirst = (window * GAP + i) * pow(GAP, layer);
-            int absoluteSecond = (window * GAP + j) * pow(GAP, layer);
+            gtsam::NonlinearFactor::shared_ptr factor = getBetweenFactor(
+                    absoluteFirst, absoluteSecond,
+                    poses[layer][window][i], poses[layer][window][j], vector6);
 
-            gtsam::NonlinearFactor::shared_ptr factor(
-                    new gtsam::BetweenFactor<gtsam::Pose3>(absoluteFirst, absoluteSecond, gtsam::Pose3(R_sam, t_sam), odometryNoise));
             graph.push_back(factor);
           }
         }
@@ -273,6 +275,20 @@ public:
     }
     mypcl::write_pose(initial_poses, data_path);
     printf("pgo complete\n");
+  }
+
+private:
+  static gtsam::NonlinearFactor::shared_ptr getBetweenFactor(int firstId, int secondId, const mypcl::pose& firstPose, const mypcl::pose& secondPose, const gtsam::Vector &covariance) {
+    Eigen::Vector3d t_ab = firstPose.t;
+    Eigen::Matrix3d R_ab = firstPose.q.toRotationMatrix();
+    t_ab = R_ab.transpose() * (secondPose.t - t_ab);
+    R_ab = R_ab.transpose() * secondPose.q.toRotationMatrix();
+    gtsam::Rot3 R_sam(R_ab);
+    gtsam::Point3 t_sam(t_ab);
+    gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(covariance);
+    gtsam::NonlinearFactor::shared_ptr factor(
+            new gtsam::BetweenFactor<gtsam::Pose3>(firstId, secondId, gtsam::Pose3(R_sam, t_sam), odometryNoise));
+    return factor;
   }
 };
 
