@@ -97,14 +97,13 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
 
   double residual_cur = 0, residual_pre = 0;
   vector<IMUST> x_buf(win_size);
-  for(int i = 0; i < win_size; i++)
-  {
+  for(int i = 0; i < win_size; i++) {
     x_buf[i].R = layer.pose_vec[part_id * GAP + i].q.toRotationMatrix();
     x_buf[i].p = layer.pose_vec[part_id * GAP + i].t;
   }
 
   for (int i = part_id * GAP; i < part_id * GAP + win_size; i++)
-    src_pc[i - part_id * GAP] = (*layer.pcds[i]).makeShared(); // deep copy here (not necessary when is last layer btw)
+    src_pc[i - part_id * GAP] = layer.pcds[i];
 
   for(int loop = 0; loop < layer.max_iter; loop++) {
     if (print_info)
@@ -150,20 +149,8 @@ void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size =
     layer.computed_poses[part_id][i].t = x_buf[i].p;
   }
 
-  // transform all the clouds
-  for(size_t i = 0; i < win_size; i++)
-  {
-    Eigen::Quaterniond q_tmp;
-    Eigen::Vector3d t_tmp;
-    assign_qt(q_tmp, t_tmp, Quaterniond(x_buf[0].R.inverse() * x_buf[i].R),
-              x_buf[0].R.inverse() * (x_buf[i].p - x_buf[0].p));
-
-    // TODO make this directly in merging, to avoid copying clouds every time (there are 2/3 copies for every cloud)
-    mypcl::transform_pointcloud(*src_pc[i], *src_pc[i], t_tmp, q_tmp);
-  }
-
   // merge them together
-  pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds(src_pc, toRemove);
+  pcl::PointCloud<PointType>::Ptr pc_keyframe = mypcl::append_clouds_with_poses(src_pc, x_buf, toRemove);
   downsample_voxel(*pc_keyframe, next_layer.downsample_size);
   next_layer.pcds[part_id] = pc_keyframe;
 }
@@ -232,10 +219,15 @@ int main(int argc, char** argv)
 
   HBA hba(data_path, thread_num);
   do {
+    std::cout << "HBA iteration " << hba.iteration << " --------------------------------" << std::endl;
     hba.init_iteration();
-    std::cout << "Iteration " << hba.iteration << " --------------------------------" << std::endl;
 
     loadPCDs(hba.curr_layer);
+    // uncomment to save the point clouds at every iteration
+    // vector<set<int>> toSkip(hba.initial_poses.size());
+    // auto pc = mypcl::append_clouds_with_poses(hba.curr_layer.pcds, hba.initial_poses, toSkip);
+    // mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, pc, hba.iteration);
+
     for (int i = 0; i < hba.total_layer_num - 1; i++) {
       std::cout << "---------------------" << std::endl;
       distribute_thread(hba.curr_layer, hba.next_layer);
@@ -244,9 +236,9 @@ int main(int argc, char** argv)
     global_ba(hba.curr_layer, hba.next_layer);
     hba.pose_graph_optimization();
 
-    // save hba.next_layer.pcds[0] to pcd file
-    pcl::PointCloud<PointType>::Ptr final_pc = hba.next_layer.pcds[0];
-    mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, final_pc, hba.iteration);
+    // save used points pointcloud to pcd file
+    // pcl::PointCloud<PointType>::Ptr final_pc = hba.next_layer.pcds[0];
+    // mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, final_pc, hba.iteration);
     printf("iteration complete\n");
   } while (!hba.has_converged());
   std::cout << "HBA completed after " << hba.iteration << " iterations." << std::endl;

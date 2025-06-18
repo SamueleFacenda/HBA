@@ -167,65 +167,28 @@ Eigen::Matrix3d jr_inv(const Eigen::Matrix3d &rotR)
 
 struct IMUST
 {
-  double t;
   Eigen::Matrix3d R;
   Eigen::Vector3d p;
-  Eigen::Vector3d v;
-  Eigen::Vector3d bg;
-  Eigen::Vector3d ba;
-  Eigen::Vector3d g;
   
   IMUST()
   {
     setZero();
   }
 
-  IMUST(double _t, const Eigen::Matrix3d& _R, const Eigen::Vector3d& _p, const Eigen::Vector3d& _v,
-        const Eigen::Vector3d& _bg, const Eigen::Vector3d& _ba,
-        const Eigen::Vector3d& _g = Eigen::Vector3d(0, 0, -G_m_s2)):
-        t(_t), R(_R), p(_p), v(_v), bg(_bg), ba(_ba), g(_g){}
-
-  IMUST &operator+=(const Eigen::Matrix<double, DIMU, 1> &ist)
-  {
-    this->R = this->R * Exp(ist.block<3, 1>(0, 0));
-    this->p += ist.block<3, 1>(3, 0);
-    this->v += ist.block<3, 1>(6, 0);
-    this->bg += ist.block<3, 1>(9, 0);
-    this->ba += ist.block<3, 1>(12, 0);
-    this->g += ist.block<3, 1>(15, 0);
-    return *this;
-  }
-
-  Eigen::Matrix<double, DIMU, 1> operator-(const IMUST &b) 
-  {
-    Eigen::Matrix<double, DIMU, 1> a;
-    a.block<3, 1>(0, 0) = Log(b.R.transpose() * this->R);
-    a.block<3, 1>(3, 0) = this->p - b.p;
-    a.block<3, 1>(6, 0) = this->v - b.v;
-    a.block<3, 1>(9, 0) = this->bg - b.bg;
-    a.block<3, 1>(12, 0) = this->ba - b.ba;
-    a.block<3, 1>(15, 0) = this->g - b.g;
-    return a;
-  }
+  IMUST(const Eigen::Matrix3d& _R, const Eigen::Vector3d& _p):
+        R(_R), p(_p){}
 
   IMUST &operator=(const IMUST &b)
   {
     this->R = b.R;
     this->p = b.p;
-    this->v = b.v;
-    this->bg = b.bg;
-    this->ba = b.ba;
-    this->g = b.g;
-    this->t = b.t;
     return *this;
   }
 
   void setZero()
   {
-    t = 0; R.setIdentity();
-    p.setZero(); v.setZero();
-    bg.setZero(); ba.setZero();
-    g << 0, 0, -G_m_s2;
+    R.setIdentity();
+    p.setZero();
   }
 };
 

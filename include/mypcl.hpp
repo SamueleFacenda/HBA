@@ -90,47 +90,8 @@ namespace mypcl
     }
   }
 
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr append_cloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc1,
-                                                      pcl::PointCloud<pcl::PointXYZRGB> pc2)
-  {
-    size_t size1 = pc1->points.size();
-    size_t size2 = pc2.points.size();
-    pc1->points.resize(size1 + size2);
-    for(size_t i = size1; i < size1 + size2; i++)
-    {
-      pc1->points[i].x = pc2.points[i-size1].x;
-      pc1->points[i].y = pc2.points[i-size1].y;
-      pc1->points[i].z = pc2.points[i-size1].z;
-      pc1->points[i].r = pc2.points[i-size1].r;
-      pc1->points[i].g = pc2.points[i-size1].g;
-      pc1->points[i].b = pc2.points[i-size1].b;
-      // pc1->points[i].intensity = pc2.points[i-size1].intensity;
-    }
-    return pc1;
-  }
-
-  pcl::PointCloud<PointType>::Ptr append_cloud(pcl::PointCloud<PointType>::Ptr pc1,
-                                               pcl::PointCloud<PointType> pc2)
-  {
-    size_t size1 = pc1->points.size();
-    size_t size2 = pc2.points.size();
-    pc1->points.resize(size1 + size2);
-    for(size_t i = size1; i < size1 + size2; i++)
-    {
-      pc1->points[i].x = pc2.points[i-size1].x;
-      pc1->points[i].y = pc2.points[i-size1].y;
-      pc1->points[i].z = pc2.points[i-size1].z;
-      // pc1->points[i].r = pc2.points[i-size1].r;
-      // pc1->points[i].g = pc2.points[i-size1].g;
-      // pc1->points[i].b = pc2.points[i-size1].b;
-      // pc1->points[i].intensity = pc2.points[i-size1].intensity;
-    }
-    return pc1;
-  }
-
-  // merge multiple clouds, avoid multiple memory allocations
-  pcl::PointCloud<PointType>::Ptr append_clouds(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec, vector<set<int>>& pointsToSkip)
-  {
+  // merge multiple clouds in the reference frame of the first cloud
+  pcl::PointCloud<PointType>::Ptr append_clouds_with_poses(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec, const vector<IMUST>& poses, const vector<set<int>>& pointsToSkip) {
     pcl::PointCloud<PointType>::Ptr pc(new pcl::PointCloud<PointType>);
     int size = 0, curr_size = 0;
     for(int i = 0; i < pc_vec.size(); i++)
@@ -138,6 +99,11 @@ namespace mypcl
 
     pc->points.resize(size);
     for(int pc_id = 0; pc_id < pc_vec.size(); pc_id++) {
+      Eigen::Quaterniond q_tmp;
+      Eigen::Vector3d t_tmp;
+      assign_qt(q_tmp, t_tmp, Eigen::Quaterniond(poses[0].R.inverse() * poses[pc_id].R),
+                poses[0].R.inverse() * (poses[pc_id].p - poses[0].p));
+
       auto toSkipIter = pointsToSkip[pc_id].begin();
       for(int i=0; i<pc_vec[pc_id]->points.size(); i++) {
         if (toSkipIter != pointsToSkip[pc_id].end() && i == *toSkipIter) {
@@ -145,13 +111,32 @@ namespace mypcl
           continue;
         }
 
-        pc->points[curr_size].x = pc_vec[pc_id]->points[i].x;
-        pc->points[curr_size].y = pc_vec[pc_id]->points[i].y;
-        pc->points[curr_size].z = pc_vec[pc_id]->points[i].z;
+        Eigen::Vector3d pt_cur(pc_vec[pc_id]->points[i].x, pc_vec[pc_id]->points[i].y, pc_vec[pc_id]->points[i].z);
+        Eigen::Vector3d pt_to = q_tmp * pt_cur + t_tmp;
+        pc->points[curr_size].x = pt_to.x();
+        pc->points[curr_size].y = pt_to.y();
+        pc->points[curr_size].z = pt_to.z();
         curr_size++;
       }
     }
+
+    pc->width = size;
+    pc->height = 1; // set height to 1 for unorganized point cloud
+    pc->is_dense = true; // set is_dense to true if there are no NaN values
     return pc;
+  }
+
+  pcl::PointCloud<PointType>::Ptr append_clouds_with_poses(std::vector<pcl::PointCloud<PointType>::Ptr> pc_vec, const vector<pose>& poses, const vector<set<int>>& pointsToSkip) {
+    vector<IMUST> x_buf;
+    x_buf.reserve(poses.size());
+    for(const auto& pose : poses)
+    {
+      IMUST tmp;
+      tmp.R = pose.q.toRotationMatrix();
+      tmp.p = pose.t;
+      x_buf.push_back(tmp);
+    }
+    return append_clouds_with_poses(pc_vec, x_buf, pointsToSkip);
   }
 
   double compute_inlier_ratio(std::vector<double> residuals, double ratio)
