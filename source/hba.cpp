@@ -86,6 +86,8 @@ void loadPCDs(LAYER& layer) {
 
   for (auto& t : threads)
     t.join();
+
+  cout << "Loaded " << layer.pcds.size() << " point clouds." << endl;
 }
 
 void compute_window(LAYER& layer, int part_id, LAYER& next_layer, int win_size = WIN_SIZE, bool print_info = false) {
@@ -178,14 +180,17 @@ void parallel_tail(LAYER& layer, int thread_id, LAYER& next_layer)
   int& part_length = layer.part_length;
   int& left_gap_num = layer.left_gap_num;
   
+  cout << "Parallel computing ";
   for(int i = thread_id*part_length; i < thread_id*part_length+left_gap_num; i++) {
-    printf("parallel computing %d\n", i);
+    cout << "#";
+    cout << flush;
     compute_window(layer, i, next_layer);
   }
   if(layer.tail > 0) {
     int i = thread_id*part_length+left_gap_num;
     compute_window(layer, i, next_layer, layer.last_win_size);
   }
+  cout << endl;
 }
 
 void global_ba(LAYER& layer, LAYER& next_layer)
@@ -226,18 +231,23 @@ int main(int argc, char** argv)
   thread_num = 20;
 
   HBA hba(data_path, thread_num);
-  loadPCDs(hba.curr_layer);
-  for(int i = 0; i < hba.total_layer_num-1; i++)
-  {
-    std::cout<<"---------------------"<<std::endl;
-    distribute_thread(hba.curr_layer, hba.next_layer);
-    hba.update_next_layer_state(i);
-  }
-  global_ba(hba.curr_layer, hba.next_layer);
-  hba.pose_graph_optimization();
+  do {
+    hba.init_iteration();
+    std::cout << "Iteration " << hba.iteration << " --------------------------------" << std::endl;
 
-  // save hba.next_layer.pcds[0] to pcd file
-  pcl::PointCloud<PointType>::Ptr final_pc = hba.next_layer.pcds[0];
-  mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, final_pc, 0);
-  printf("iteration complete\n");
+    loadPCDs(hba.curr_layer);
+    for (int i = 0; i < hba.total_layer_num - 1; i++) {
+      std::cout << "---------------------" << std::endl;
+      distribute_thread(hba.curr_layer, hba.next_layer);
+      hba.update_next_layer_state(i);
+    }
+    global_ba(hba.curr_layer, hba.next_layer);
+    hba.pose_graph_optimization();
+
+    // save hba.next_layer.pcds[0] to pcd file
+    pcl::PointCloud<PointType>::Ptr final_pc = hba.next_layer.pcds[0];
+    mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, final_pc, hba.iteration);
+    printf("iteration complete\n");
+  } while (!hba.has_converged());
+  std::cout << "HBA completed after " << hba.iteration << " iterations." << std::endl;
 }

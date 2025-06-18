@@ -40,6 +40,7 @@
 #include "ba.hpp"
 
 #define MAX_LAST_WIN_SIZE (4 * WIN_SIZE)
+#define CONVERGENCE_THRESHOLD 0.05
 
 class LAYER
 {
@@ -141,35 +142,43 @@ public:
 class HBA
 {
 public:
-  int thread_num, total_layer_num;
+  int thread_num, total_layer_num, iteration;
   LAYER curr_layer, next_layer;
   string data_path;
   vector<vector<VEC(6)>> covariances;
   vector<vector<vector<mypcl::pose>>> poses; // poses[layer_num][window_num]
-  vector<mypcl::pose> initial_poses;
+  vector<mypcl::pose> initial_poses, final_poses;
 
   HBA(std::string data_path_, int thread_num_)
   {
     thread_num = thread_num_;
     data_path = data_path_;
+    iteration = 0;
 
-    curr_layer.layer_num = 1;
-    curr_layer.data_path = data_path;
-    curr_layer.thread_num = thread_num;
-    curr_layer.pose_vec = mypcl::read_pose(data_path + "pose.json");
-    initial_poses = curr_layer.pose_vec;
+    // load poses, every iteration expects to have poses from previous iteration so we put them in final_poses
+    final_poses = mypcl::read_pose(data_path + "pose.json");
+    mypcl::write_pose(final_poses, data_path + "out" + std::to_string(iteration) + "_");
 
     // this is the resolution of the equation that finds the number of layers necessary to have a last window size <= MAX_LAST_WIN_SIZE
     // the minimum value for the last window size is MAX_LAST_WIN_SIZE / GAP
     // to use in the last layer at most the amount of resources of the first layer use MAX_LAST_WIN_SIZE = WIN_SIZE * sqrt(nthreads)
     // the plus one is because the last layer uses all the poses as a single window and doesn't divide them
-    total_layer_num = ceil(log(curr_layer.pose_vec.size() / MAX_LAST_WIN_SIZE) / log(GAP)) + 1;
+    total_layer_num = ceil(log(final_poses.size() / MAX_LAST_WIN_SIZE) / log(GAP)) + 1;
+  }
+
+  void init_iteration() {
+    iteration++;
+
+    curr_layer.layer_num = 1;
+    curr_layer.data_path = data_path;
+    curr_layer.thread_num = thread_num;
+    curr_layer.pose_vec = final_poses; // get the final poses from the previous iteration
+
+    initial_poses = curr_layer.pose_vec;
 
     curr_layer.init_parameter();
     curr_layer.init_storage(total_layer_num);
     init_next_layer();
-
-    printf("HBA init done!\n");
   }
 
   void init_next_layer() {
@@ -205,6 +214,21 @@ public:
     init_next_layer();
   }
 
+  bool has_converged() {
+    // compare initial and final poses
+    double maxDistance = 0;
+    double sumDistance = 0;
+    for (size_t i = 0; i < initial_poses.size(); i++) {
+      double distance = (initial_poses[i].t - final_poses[i].t).norm();
+      if (distance > maxDistance)
+        maxDistance = distance;
+      sumDistance += distance;
+    }
+    cout << "Average distance between initial and final poses: " << sumDistance / initial_poses.size() << endl;
+    cout << "Max distance between initial and final poses: " << maxDistance << endl;
+    return maxDistance < CONVERGENCE_THRESHOLD;
+  }
+
   void pose_graph_optimization()
   {
     poses.push_back(curr_layer.computed_poses); // TODO do it in the proper place
@@ -214,7 +238,7 @@ public:
     gtsam::Values initial;
     gtsam::NonlinearFactorGraph graph;
     gtsam::Vector vector6(6);
-    vector6 << 1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-8;
+    vector6 << 1e-15, 1e-15, 1e-15, 1e-15, 1e-15, 1e-15;
     gtsam::noiseModel::Diagonal::shared_ptr priorModel = gtsam::noiseModel::Diagonal::Variances(vector6);
 
     // build initials
@@ -226,7 +250,7 @@ public:
 
     // to avoid disconnected graph, add factors between initial poses
     for (int i = 0; i < initial_poses.size() - 1; i++) {
-      vector6 << 0.005, 0.005, 0.005, 0.005, 0.005, 0.005; // TODO set proper values
+      vector6 << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01; // TODO set proper values
       gtsam::NonlinearFactor::shared_ptr factor = getBetweenFactor(i, i+1, initial_poses[i], initial_poses[i+1], vector6);
       graph.push_back(factor);
     }
@@ -266,15 +290,15 @@ public:
 
     gtsam::Values results = isam.calculateEstimate();
 
-    cout << "vertex size " << results.size() << endl;
 
     for(uint i = 0; i < results.size(); i++)
     {
       gtsam::Pose3 pose = results.at(i).cast<gtsam::Pose3>();
-      assign_qt(initial_poses[i].q, initial_poses[i].t, Eigen::Quaterniond(pose.rotation().matrix()), pose.translation());
+      assign_qt(final_poses[i].q, final_poses[i].t, Eigen::Quaterniond(pose.rotation().matrix()), pose.translation());
     }
-    mypcl::write_pose(initial_poses, data_path);
-    printf("pgo complete\n");
+    mypcl::write_pose(final_poses, data_path);
+    mypcl::write_pose(final_poses, data_path + "out" + std::to_string(iteration) + "_");
+    cout << "PGO completed" << endl;
   }
 
 private:
