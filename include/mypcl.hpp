@@ -49,7 +49,7 @@ namespace mypcl
     cout << "Saving PCD to: " << filePath + ss.str() + ".pcd" << endl;
     pcl::io::savePCDFileBinary(filePath + ss.str() + ".pcd", *pc);
   }
-  
+
   std::vector<pose> read_pose(std::string filename,
                               Eigen::Quaterniond qe = Eigen::Quaterniond(1, 0, 0, 0),
                               Eigen::Vector3d te = Eigen::Vector3d(0, 0, 0))
@@ -152,11 +152,8 @@ namespace mypcl
   void write_pose(std::vector<pose>& pose_vec, std::string path)
   {
     std::ofstream file;
-    file.open(path + "pose.json", std::ofstream::trunc);
-    file.close();
-    Eigen::Quaterniond q0(pose_vec[0].q.w(), pose_vec[0].q.x(), pose_vec[0].q.y(), pose_vec[0].q.z());
-    Eigen::Vector3d t0(pose_vec[0].t(0), pose_vec[0].t(1), pose_vec[0].t(2));
-    file.open(path + "pose.json", std::ofstream::app);
+    file.open(path + "pose.json");
+    file << std::setprecision(10);
 
     for(size_t i = 0; i < pose_vec.size(); i++)
     {

@@ -40,7 +40,7 @@
 #include "ba.hpp"
 
 #define MAX_LAST_WIN_SIZE (4 * WIN_SIZE)
-#define CONVERGENCE_THRESHOLD 0.05
+#define CONVERGENCE_THRESHOLD 0.005
 
 class LAYER
 {
@@ -169,9 +169,13 @@ public:
   void init_iteration() {
     iteration++;
 
+    poses.clear();
+    covariances.clear();
+
     curr_layer.layer_num = 1;
     curr_layer.data_path = data_path;
     curr_layer.thread_num = thread_num;
+    // final_poses = mypcl::read_pose(data_path + "pose.json");
     curr_layer.pose_vec = final_poses; // get the final poses from the previous iteration
 
     initial_poses = curr_layer.pose_vec;
@@ -250,7 +254,7 @@ public:
 
     // to avoid disconnected graph, add factors between initial poses
     for (int i = 0; i < initial_poses.size() - 1; i++) {
-      vector6 << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01; // TODO set proper values
+      vector6 << 1, 1, 1, 1, 1, 1; // TODO set proper values
       gtsam::NonlinearFactor::shared_ptr factor = getBetweenFactor(i, i+1, initial_poses[i], initial_poses[i+1], vector6);
       graph.push_back(factor);
     }

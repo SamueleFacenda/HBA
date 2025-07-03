@@ -224,9 +224,9 @@ int main(int argc, char** argv)
 
     loadPCDs(hba.curr_layer);
     // uncomment to save the point clouds at every iteration
-    // vector<set<int>> toSkip(hba.initial_poses.size());
-    // auto pc = mypcl::append_clouds_with_poses(hba.curr_layer.pcds, hba.initial_poses, toSkip);
-    // mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, pc, hba.iteration);
+//    vector<set<int>> toSkip(hba.initial_poses.size());
+//    auto pc = mypcl::append_clouds_with_poses(hba.curr_layer.pcds, hba.initial_poses, toSkip);
+//    mypcl::savdPCD(hba.next_layer.data_path, pcd_name_fill_num, pc, hba.iteration);
 
     for (int i = 0; i < hba.total_layer_num - 1; i++) {
       std::cout << "---------------------" << std::endl;
