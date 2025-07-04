@@ -6,7 +6,6 @@
 #include <string>
 
 #include <mutex>
-#include <assert.h>
 #include <ros/ros.h>
 #include <Eigen/StdVector>
 
@@ -20,7 +19,8 @@
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/nonlinear/Values.h>
-#include <gtsam/nonlinear/ISAM2.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/DoglegOptimizer.h>
 
 #include <Eigen/Dense>
 #include <sensor_msgs/Imu.h>
@@ -40,7 +40,7 @@
 #include "ba.hpp"
 
 #define MAX_LAST_WIN_SIZE (4 * WIN_SIZE)
-#define CONVERGENCE_THRESHOLD 0.005
+#define CONVERGENCE_THRESHOLD 0.05
 
 class LAYER
 {
@@ -66,7 +66,9 @@ public:
     voxel_size = 4.0;
     eigen_ratio = 0.1;
     reject_ratio = 0.05;
-    pose_vec.clear(); mthreads.clear(); pcds.clear();
+    pose_vec.clear();
+    mthreads.clear();
+    pcds.clear();
     hessians.clear();
   }
 
@@ -285,15 +287,16 @@ public:
       }
     }
 
-    gtsam::ISAM2Params parameters;
-    parameters.relinearizeThreshold = 0.01;
-    parameters.relinearizeSkip = 1;
-    gtsam::ISAM2 isam(parameters);
-    isam.update(graph, initial);
-    isam.update();
+    gtsam::DoglegParams params;
+    params.setVerbosity("ERROR");  // Options: SILENT, TERMINATION, VALUES, DELTA
+    params.maxIterations = 100;
+    params.linearSolverType = gtsam::NonlinearOptimizerParams::MULTIFRONTAL_QR;
+    gtsam::DoglegOptimizer optimizer(graph, initial, params);
+    gtsam::Values results = optimizer.optimize();
 
-    gtsam::Values results = isam.calculateEstimate();
-
+    std::ofstream dot_file(data_path + "pose_graph_" + std::to_string(iteration)  + ".dot");
+    graph.saveGraph(dot_file, initial);
+    dot_file.close();
 
     for(uint i = 0; i < results.size(); i++)
     {

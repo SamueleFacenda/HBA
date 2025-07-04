@@ -613,8 +613,8 @@ public:
       return;
     std::sort(residuals.begin(), residuals.end()); // sort in ascending order
 
-    int raw_index = static_cast<int>(std::floor((1.0 - ratio) * nvx) - 1);
-    size_t threshold_index = std::clamp(raw_index, 0, static_cast<int>(nvx - 1));
+    size_t threshold_index = std::max(0.0, std::floor((1.0 - ratio) * nvx));
+    threshold_index = std::min(threshold_index, nvx - 1);
     double threshold = residuals[threshold_index];
 
     int reject_num = std::floor(ratio * voxhess.plvec_voxels.size());
